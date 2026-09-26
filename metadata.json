@@ -1,0 +1,6 @@
+{
+  "name": "SynapseAI — Personalized Learning Platform",
+  "description": "An AI-powered adaptive education platform with deterministic knowledge-gap detection, prerequisite intelligence, personalized learning paths, and adaptive assessments.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
