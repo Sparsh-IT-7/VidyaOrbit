@@ -24,7 +24,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
-import { BrandLogo } from '../components/AppShell';
+import { BrandLogo, GlobalHeader } from '../components/AppShell';
 import { C_CONCEPT_DEFINITIONS } from '../data/curriculumData';
 import { ConceptId, StudentLevel } from '../types/learning';
 
@@ -80,48 +80,8 @@ export const LandingPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 flex flex-col">
-      {/* Clean 3-Zone Top Bar */}
-      <header className="sticky top-0 z-40 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 md:px-12 flex items-center justify-between">
-        <button type="button" onClick={() => setRoute('landing')} className="focus:outline-none">
-          <BrandLogo />
-        </button>
-
-        <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-          <a href="#workflow" className="hover:text-slate-900 transition-colors">
-            How It Works
-          </a>
-          <a href="#capabilities" className="hover:text-slate-900 transition-colors">
-            Features
-          </a>
-          <a href="#architecture" className="hover:text-slate-900 transition-colors">
-            How We Grade
-          </a>
-          <button
-            type="button"
-            onClick={() => startDemoMode('dashboard')}
-            className="text-[#B59024] font-semibold hover:underline transition-colors"
-          >
-            Live Demo
-          </button>
-        </nav>
-
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setRoute('login')}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors whitespace-nowrap"
-          >
-            Student Login
-          </button>
-          <button
-            type="button"
-            onClick={() => setRoute('signup')}
-            className="px-4 py-2 rounded-lg bg-[#D4AF37] text-slate-950 text-sm font-bold hover:bg-[#c59f2d] transition-all whitespace-nowrap"
-          >
-            Start Learning
-          </button>
-        </div>
-      </header>
+      {/* Global Website Header with Official VidyaOrbit Logo */}
+      <GlobalHeader mode="public" />
 
       {/* Hero Section */}
       <section className="py-16 md:py-24 px-6 md:px-12 max-w-[1280px] mx-auto w-full">
@@ -352,39 +312,13 @@ export const LandingPage: React.FC = () => {
 const AuthPageLayout: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
-  const { setRoute, startDemoMode } = useLearning();
-
   return (
-    <div className="min-h-screen bg-white text-slate-900 flex flex-col justify-between px-4 py-6 sm:px-8">
-      <header className="max-w-5xl mx-auto w-full flex items-center justify-between py-2 border-b border-slate-100 pb-4">
-        <button
-          type="button"
-          onClick={() => setRoute('landing')}
-          className="focus:outline-none flex items-center gap-2"
-        >
-          <BrandLogo />
-        </button>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setRoute('landing')}
-            className="text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors"
-          >
-            Platform Overview
-          </button>
-          <button
-            type="button"
-            onClick={() => startDemoMode('dashboard')}
-            className="text-xs font-bold text-[#B59024] hover:underline"
-          >
-            Quick Demo →
-          </button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-white text-slate-900 flex flex-col justify-between">
+      <GlobalHeader mode="auth" />
 
-      <main className="max-w-md w-full mx-auto my-8">{children}</main>
+      <main className="max-w-md w-full mx-auto my-8 px-4 sm:px-0">{children}</main>
 
-      <footer className="text-center text-xs text-slate-400 py-2">
+      <footer className="text-center text-xs text-slate-400 py-4 border-t border-slate-100">
         VidyaOrbit · Adaptive Engineering Education Platform
       </footer>
     </div>
@@ -1540,15 +1474,11 @@ export const OnboardingPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between p-6">
-      <div className="max-w-3xl mx-auto w-full flex items-center justify-between py-2">
-        <button type="button" onClick={() => setRoute('dashboard')}>
-          <BrandLogo />
-        </button>
-        <div className="text-xs font-mono text-slate-500">
-          Step {step} of 4 · Setup Your Profile
-        </div>
-      </div>
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between">
+      <GlobalHeader
+        mode="onboarding"
+        onboardingStepText={`Step ${step} of 4 · Setup Your Profile`}
+      />
 
       <div className="max-w-3xl mx-auto w-full bg-white border border-slate-200 rounded-2xl p-6 md:p-10 space-y-8 my-8">
         {/* Progress Bar */}

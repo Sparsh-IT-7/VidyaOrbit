@@ -15,9 +15,10 @@ import {
   CheckCircle2,
   Sparkles,
   BookOpen,
+  ImagePlus,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
-import { UserAvatar } from '../components/AppShell';
+import { BrandLogo, CUSTOM_LOGO_STORAGE_KEY, UserAvatar } from '../components/AppShell';
 import { QUESTION_BANK } from '../data/curriculumData';
 import { ConceptId } from '../types/learning';
 import {
@@ -60,6 +61,42 @@ export const DashboardPage: React.FC = () => {
   const [tutorInput, setTutorInput] = useState<string>('');
   const [sandboxOpen, setSandboxOpen] = useState<boolean>(false);
   const [cohortOpen, setCohortOpen] = useState<boolean>(false);
+  const [hasCustomLogo, setHasCustomLogo] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY));
+    } catch {
+      return false;
+    }
+  });
+
+  const handleDashboardLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        try {
+          localStorage.setItem(CUSTOM_LOGO_STORAGE_KEY, reader.result);
+          window.dispatchEvent(new Event('vidyaorbit-logo-change'));
+          setHasCustomLogo(true);
+        } catch {
+          // ignore storage quota errors
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleResetDashboardLogo = () => {
+    try {
+      localStorage.removeItem(CUSTOM_LOGO_STORAGE_KEY);
+      window.dispatchEvent(new Event('vidyaorbit-logo-change'));
+      setHasCustomLogo(false);
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   const currentQuestion = dashboardQuestions[quizIndex % dashboardQuestions.length];
 
@@ -118,8 +155,40 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="flex flex-col w-full pb-16 space-y-8">
-      {/* 1. CLEAN BEGINNER-FRIENDLY WELCOME BANNER */}
-      <section className="rounded-2xl bg-slate-50 border border-slate-200 p-6 md:p-8 shadow-2xs">
+      {/* 1. CLEAN BEGINNER-FRIENDLY WELCOME BANNER WITH VIDYAORBIT LOGO */}
+      <section className="rounded-2xl bg-slate-50 border border-slate-200 p-6 md:p-8 shadow-2xs space-y-6">
+        {/* Dashboard Brand Identity Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
+          <div className="flex items-center gap-3">
+            <BrandLogo />
+            <span className="hidden sm:inline-block text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
+              Student Learning Dashboard
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-[#D4AF37] text-xs font-semibold text-slate-700 transition-colors">
+              <ImagePlus className="w-3.5 h-3.5 text-[#B59024]" />
+              <span>{hasCustomLogo ? 'Change Logo Image' : 'Upload Official Logo'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleDashboardLogoUpload}
+                className="hidden"
+              />
+            </label>
+            {hasCustomLogo && (
+              <button
+                type="button"
+                onClick={handleResetDashboardLogo}
+                className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-medium text-slate-600 transition-colors"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
           <div className="max-w-2xl space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">

@@ -364,7 +364,7 @@ export const SubjectManagementPage: React.FC = () => {
         </div>
 
         {/* Right Column: Syllabus Data & Course Structure Inspector (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
+        <div id="syllabus-inspector" className="lg:col-span-7 space-y-6 scroll-mt-20">
           <div className="p-6 md:p-8 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-6">
             {/* Subject Header */}
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-slate-200">
