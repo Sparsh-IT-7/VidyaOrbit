@@ -11,7 +11,6 @@ import { UserAvatar } from '../components/AppShell';
 import { ConceptId, StudentLevel } from '../types/learning';
 import { DEFAULT_THRESHOLDS } from '../engine/deterministicEngine';
 import {
-  AudioTranscribeMicButton,
   LiveVoiceCoachPanel,
 } from '../components/VoiceAndAudioControls';
 
@@ -290,20 +289,15 @@ export const AiAssistantPage: React.FC = () => {
           )}
         </div>
 
-        {/* Input Form with Audio Transcription (gemini-3.5-transcribe) */}
+        {/* Input Form */}
         <form onSubmit={handleSend} className="pt-2">
           <div className="flex items-center gap-2 p-2 pl-4 rounded-xl bg-slate-50 border border-slate-200 focus-within:border-[#D4AF37] focus-within:bg-white">
             <input
               type="text"
               value={promptInput}
               onChange={(e) => setPromptInput(e.target.value)}
-              placeholder={`Ask about ${activeConcept.shortName} or use voice input...`}
+              placeholder={`Ask about ${activeConcept.shortName}...`}
               className="flex-1 bg-transparent border-0 outline-none text-slate-900 placeholder:text-slate-400 text-xs"
-            />
-            <AudioTranscribeMicButton
-              onTranscribed={(transcript) =>
-                setPromptInput((prev) => (prev ? `${prev} ${transcript}` : transcript))
-              }
             />
             <button
               type="submit"

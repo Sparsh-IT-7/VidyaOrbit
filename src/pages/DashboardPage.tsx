@@ -18,7 +18,6 @@ import { useLearning } from '../context/LearningContext';
 import { BrandLogo, UserAvatar } from '../components/AppShell';
 import { ConceptId } from '../types/learning';
 import {
-  AudioTranscribeMicButton,
   LiveVoiceCoachPanel,
 } from '../components/VoiceAndAudioControls';
 import {
@@ -975,20 +974,15 @@ export const DashboardPage: React.FC = () => {
           )}
         </div>
 
-        {/* Chat Prompt Input Box with Audio Transcription (gemini-3.5-transcribe) */}
+        {/* Chat Prompt Input Box */}
         <form onSubmit={handleSendTutor} className="pt-1">
           <div className="flex items-center gap-2 p-2 pl-4 rounded-xl bg-slate-50 border border-slate-200 focus-within:border-[#D4AF37] focus-within:bg-white">
             <input
               type="text"
               value={tutorInput}
               onChange={(e) => setTutorInput(e.target.value)}
-              placeholder={`Ask VidyaOrbit AI about ${recommendedNextStep.shortName}, or use voice input...`}
+              placeholder={`Ask VidyaOrbit AI about ${recommendedNextStep.shortName}...`}
               className="flex-1 bg-transparent border-0 outline-none text-slate-900 placeholder:text-slate-400 text-xs"
-            />
-            <AudioTranscribeMicButton
-              onTranscribed={(transcript) =>
-                setTutorInput((prev) => (prev ? `${prev} ${transcript}` : transcript))
-              }
             />
             <button
               type="submit"

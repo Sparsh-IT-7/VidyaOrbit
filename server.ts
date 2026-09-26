@@ -36,6 +36,24 @@ function getGeminiClient(): GoogleGenAI | null {
 // --- Production SMTP & JWT Student Authentication Endpoints ---
 registerSmtpAuthRoutes(app);
 
+// In-memory tutor response cache and model quota cooldown tracker to prevent 429 rate limit exhaustion
+const tutorResponseCache = new Map<string, { reply: string; source: string; cachedAt: number }>();
+const modelQuotaCooldownUntil = new Map<string, number>();
+const TUTOR_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const QUOTA_COOLDOWN_MS = 60 * 1000; // 60 seconds cooldown per model after a 429
+
+function isQuotaOrRateLimitError(err: any): boolean {
+  const msg = String(err?.message || err?.status || '');
+  return (
+    err?.status === 429 ||
+    err?.code === 429 ||
+    msg.includes('429') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit')
+  );
+}
+
 // --- Audio Transcription Endpoint using gemini-3.5-transcribe ---
 app.post('/api/ai/transcribe', async (req, res) => {
   try {
@@ -81,7 +99,12 @@ app.post('/api/ai/transcribe', async (req, res) => {
       model: 'gemini-3.5-transcribe',
     });
   } catch (error: any) {
-    console.error('Audio transcription error (gemini-3.5-transcribe):', error);
+    if (isQuotaOrRateLimitError(error)) {
+      return res.status(429).json({
+        error: 'Voice transcription quota temporarily reached. Please use browser speech recognition or try again shortly.',
+      });
+    }
+    console.warn('Audio transcription warning (gemini-3.5-transcribe):', error?.message || error);
     return res.status(500).json({
       error: error?.message || 'Failed to transcribe audio with gemini-3.5-transcribe.',
     });
@@ -114,6 +137,15 @@ app.post('/api/ai/tutor', async (req, res) => {
 
     const ai = getGeminiClient();
     const ctx = studentContext || {};
+    const cacheKey = `${ctx.subject || 'CS101'}::${ctx.concept || 'Functions'}::${ctx.level || 'Intermediate'}::${actionType || 'chat'}::${(prompt || '').trim().toLowerCase()}`;
+
+    const cached = tutorResponseCache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt < TUTOR_CACHE_TTL_MS) {
+      return res.json({
+        reply: cached.reply,
+        source: cached.source,
+      });
+    }
 
     if (ai) {
       const systemInstruction = `You are VidyaOrbit AI Tutor, a friendly, beginner-friendly adaptive learning assistant inside the "VidyaOrbit — AI-Powered Personalized Learning Platform".
@@ -128,22 +160,46 @@ IMPORTANT PEDAGOGICAL RULES:
    - Prerequisites: ${(ctx.prerequisites || ['Loops', 'Conditions']).join(', ')}
    - Recent Mistake Context: ${ctx.recentMistake || 'Confusing pass-by-value with pass-by-reference and missing return types'}
    - Preferred Explanation Style: ${ctx.explanationStyle || 'Step-by-step with concrete C code examples'}
-3. Do NOT blindly hand out final quiz answers if the student is asking for help on an active question; guide them with conceptual clarity, analogies, short C code snippets, and a quick check-for-understanding question at the end.
+3. Do NOT blindly hand out final quiz answers if the student is asking for help on an active question; guide them with conceptual clarity, analogies, short code snippets, and a quick check-for-understanding question at the end.
 4. Keep responses concise, structured, and easy to scan (120-220 words max).`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.65,
-        },
-      });
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
 
-      return res.json({
-        reply: response.text || 'Let us break down this concept step by step.',
-        source: 'gemini-3.8-flash',
-      });
+      for (const modelName of candidateModels) {
+        const cooldownUntil = modelQuotaCooldownUntil.get(modelName) || 0;
+        if (Date.now() < cooldownUntil) {
+          continue;
+        }
+
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              systemInstruction,
+              temperature: 0.65,
+            },
+          });
+
+          const replyText = (response.text || '').trim();
+          if (replyText) {
+            tutorResponseCache.set(cacheKey, {
+              reply: replyText,
+              source: modelName,
+              cachedAt: Date.now(),
+            });
+            return res.json({
+              reply: replyText,
+              source: modelName,
+            });
+          }
+        } catch (modelErr: any) {
+          if (isQuotaOrRateLimitError(modelErr)) {
+            modelQuotaCooldownUntil.set(modelName, Date.now() + QUOTA_COOLDOWN_MS);
+          }
+          // Continue to next candidate model or fall through to deterministic pedagogical fallback
+        }
+      }
     }
 
     // Contextual pedagogical fallback if GEMINI_API_KEY is not configured in local demo environment
@@ -187,14 +243,21 @@ IMPORTANT PEDAGOGICAL RULES:
       reply = `### VidyaOrbit AI Guidance — ${conceptName} (${subjectLabel})\n\nBased on your current profile (**${conceptName}: ${mastery}% mastery**, Level: **${level}**), let's connect **${conceptName}** directly to your foundation in **${prereqsText}**.\n\nYour primary focus area for **${conceptName}** is overcoming *${recentMistake}*. Would you like a **simple explanation**, a **worked example**, or a **progressive hint** for **${conceptName}** in **${subjectLabel}**?`;
     }
 
+    tutorResponseCache.set(cacheKey, {
+      reply,
+      source: 'pedagogical-engine',
+      cachedAt: Date.now(),
+    });
+
     return res.json({
       reply,
       source: 'pedagogical-engine',
     });
   } catch (error: any) {
-    console.error('AI Tutor error:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to generate AI tutor response.',
+    return res.json({
+      reply:
+        'Let us break down this concept step by step. Focus on the prerequisite foundations and check the boundary conditions before locking in your answer.',
+      source: 'pedagogical-engine',
     });
   }
 });
