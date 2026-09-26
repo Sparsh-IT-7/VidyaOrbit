@@ -18,6 +18,7 @@ import { ConceptId } from '../types/learning';
 
 export const KnowledgeMapPage: React.FC = () => {
   const {
+    activeSubject,
     conceptStates,
     activeConceptId,
     setActiveConceptId,
@@ -28,7 +29,6 @@ export const KnowledgeMapPage: React.FC = () => {
 
   const selectedConcept =
     conceptStates.find((c) => c.id === activeConceptId) ||
-    conceptStates.find((c) => c.id === 'functions') ||
     conceptStates[0];
 
   const handleLaunchLesson = (id: ConceptId) => {
@@ -47,14 +47,13 @@ export const KnowledgeMapPage: React.FC = () => {
       <section className="p-6 md:p-8 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div className="space-y-2 max-w-2xl">
           <div className="text-xs font-bold text-[#B59024]">
-            Concept Dependency Graph
+            Concept Dependency Graph · {activeSubject.code}
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">
-            Interactive Knowledge Map
+            {activeSubject.name} — What You Know
           </h1>
           <p className="text-sm text-slate-600 leading-relaxed">
-            Click any topic below to see your current mastery score, required prerequisites, and
-            what topics it unlocks next.
+            Click any topic in {activeSubject.name} below to see your current mastery score, required prerequisites, and what topics it unlocks next.
           </p>
         </div>
 
@@ -85,9 +84,11 @@ export const KnowledgeMapPage: React.FC = () => {
         <div className="lg:col-span-7 p-6 md:p-8 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-2xs">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <h2 className="text-base font-bold text-slate-900">
-              C Programming Topic Chain
+              {activeSubject.name} Topic Chain
             </h2>
-            <span className="text-xs font-mono text-slate-400">Step 01 → 09</span>
+            <span className="text-xs font-mono text-slate-400">
+              Step 01 → 0{conceptStates.length}
+            </span>
           </div>
 
           <div className="pt-2 flex flex-col items-center">
@@ -347,7 +348,7 @@ export const KnowledgeMapPage: React.FC = () => {
                 className="w-full accent-[#D4AF37]"
               />
               <div className="text-[11px] text-slate-400">
-                Slide Functions above {thresholds.developingMin}% to see Pointers unlock immediately.
+                Slide {selectedConcept.shortName} above {thresholds.developingMin}% to see dependent topics in {activeSubject.name} unlock immediately.
               </div>
             </div>
           </div>
@@ -359,8 +360,8 @@ export const KnowledgeMapPage: React.FC = () => {
 
 export const PersonalizedLearningPathPage: React.FC = () => {
   const {
+    activeSubject,
     learningPath,
-    student,
     recommendedNextStep,
     setActiveConceptId,
     setRoute,
@@ -382,10 +383,10 @@ export const PersonalizedLearningPathPage: React.FC = () => {
         <div className="space-y-2 max-w-2xl">
           <div className="inline-flex items-center gap-2 text-xs font-bold text-[#B59024]">
             <Sparkles className="w-4 h-4" />
-            <span>Personalized Study Plan · {student.subject}</span>
+            <span>Personalized Study Plan · {activeSubject.name} ({activeSubject.code})</span>
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">
-            Your Learning Path
+            Key Learning Steps — {activeSubject.name}
           </h1>
           <p className="text-sm text-slate-600 leading-relaxed">
             Ordered step-by-step based on what you already know, which topics need practice, and

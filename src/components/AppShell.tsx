@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   LayoutDashboard,
   Route,
@@ -10,7 +10,6 @@ import {
   UserCheck,
   Settings,
   Search,
-  Bell,
   Flame,
   Sparkles,
   Compass,
@@ -22,40 +21,13 @@ import {
   GraduationCap,
   User,
   ArrowRight,
-  Layers,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
 import { AppRoute, ConceptId } from '../types/learning';
 
-export const CUSTOM_LOGO_STORAGE_KEY = 'vidyaorbit_official_logo_src_v1';
 export const DEFAULT_LOGO_SRC = '/vidyaorbit-logo.svg';
 
 export const BrandLogo: React.FC<{ size?: 'sm' | 'md' | 'header' }> = ({ size = 'header' }) => {
-  const [logoSrc, setLogoSrc] = useState<string>(() => {
-    try {
-      return localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY) || DEFAULT_LOGO_SRC;
-    } catch {
-      return DEFAULT_LOGO_SRC;
-    }
-  });
-
-  useEffect(() => {
-    const syncLogo = () => {
-      try {
-        const stored = localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY);
-        setLogoSrc(stored || DEFAULT_LOGO_SRC);
-      } catch {
-        setLogoSrc(DEFAULT_LOGO_SRC);
-      }
-    };
-    window.addEventListener('vidyaorbit-logo-change', syncLogo);
-    window.addEventListener('storage', syncLogo);
-    return () => {
-      window.removeEventListener('vidyaorbit-logo-change', syncLogo);
-      window.removeEventListener('storage', syncLogo);
-    };
-  }, []);
-
   // Responsive width rules from specification:
   // Mobile: ~100–130px wide (w-[118px])
   // Tablet: ~120–150px wide (md:w-[138px])
@@ -67,14 +39,9 @@ export const BrandLogo: React.FC<{ size?: 'sm' | 'md' | 'header' }> = ({ size = 
 
   return (
     <img
-      src={logoSrc}
+      src={DEFAULT_LOGO_SRC}
       alt="VidyaOrbit"
       referrerPolicy="no-referrer"
-      onError={() => {
-        if (logoSrc !== DEFAULT_LOGO_SRC) {
-          setLogoSrc(DEFAULT_LOGO_SRC);
-        }
-      }}
       className={`${widthClasses} h-auto max-h-11 object-contain select-none block shrink-0`}
     />
   );
@@ -169,7 +136,9 @@ export const GlobalHeader: React.FC<{
     setRoute,
     isAuthenticated,
     student,
+    activeSubject,
     conceptStates,
+    recommendedNextStep,
     subjects,
     selectEngineeringSubject,
     setActiveConceptId,
@@ -367,7 +336,7 @@ export const GlobalHeader: React.FC<{
                       setSearchOpen(true);
                     }}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder="Search topics (Functions, SQL...)"
+                    placeholder="Search topic"
                     className="bg-transparent border-0 outline-none w-full text-slate-900 placeholder:text-slate-400 text-xs"
                   />
                   {searchQuery && (
@@ -452,10 +421,10 @@ export const GlobalHeader: React.FC<{
                       className="w-full text-left p-2 rounded-lg hover:bg-[#FBF7E8] transition-colors"
                     >
                       <div className="text-xs font-bold text-[#B59024]">
-                        1. Default Diagnostic (68%)
+                        1. Default Diagnostic ({activeSubject.code})
                       </div>
                       <div className="text-[11px] text-slate-500">
-                        Functions Weak (52%) · Pointers Locked (31%)
+                        {recommendedNextStep?.shortName || 'Core Topic'} Focus ({recommendedNextStep?.mastery ?? 52}%)
                       </div>
                     </button>
                     <button
@@ -467,10 +436,10 @@ export const GlobalHeader: React.FC<{
                       className="w-full text-left p-2 rounded-lg hover:bg-[#FBF7E8] transition-colors"
                     >
                       <div className="text-xs font-bold text-slate-900">
-                        2. Functions Revised (72%)
+                        2. Core Topics Revised (74%+)
                       </div>
                       <div className="text-[11px] text-slate-500">
-                        Functions Developing (72%) · Unlocks Pointers!
+                        Prerequisites ≥ 60% · Unlocks Advanced Topics!
                       </div>
                     </button>
                     <button
@@ -482,10 +451,10 @@ export const GlobalHeader: React.FC<{
                       className="w-full text-left p-2 rounded-lg hover:bg-[#FBF7E8] transition-colors"
                     >
                       <div className="text-xs font-bold text-slate-900">
-                        3. High Mastery (85%)
+                        3. High Mastery (85%+)
                       </div>
                       <div className="text-[11px] text-slate-500">
-                        7/9 Topics Mastered · Pointers Developing (78%)
+                        Most {activeSubject.name} Topics Mastered
                       </div>
                     </button>
                   </div>
@@ -496,16 +465,6 @@ export const GlobalHeader: React.FC<{
                 <Flame className="w-3.5 h-3.5 fill-[#D4AF37] text-[#B59024]" />
                 <span>{student.streakDays}d</span>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setRoute('diagnostic-result')}
-                title="View Performance Analysis"
-                className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-              >
-                <Bell className="w-4 h-4" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#D4AF37]" />
-              </button>
 
               {/* [ Profile ] Button */}
               <button
@@ -640,7 +599,7 @@ export const GlobalHeader: React.FC<{
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder="Search any topic..."
+                    placeholder="Search topic"
                     className="bg-transparent border-0 outline-none w-full text-slate-900 placeholder:text-slate-400 text-xs"
                   />
                 </div>

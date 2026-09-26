@@ -18,6 +18,7 @@ import {
 export const AiAssistantPage: React.FC = () => {
   const {
     student,
+    activeSubject,
     conceptStates,
     activeConceptId,
     setActiveConceptId,
@@ -32,7 +33,7 @@ export const AiAssistantPage: React.FC = () => {
 
   const activeConcept =
     conceptStates.find((c) => c.id === activeConceptId) ||
-    conceptStates.find((c) => c.id === 'functions')!;
+    conceptStates[0];
 
   const weakConcepts = conceptStates.filter(
     (c) => c.rawClassification === 'Weak' || c.rawClassification === 'Knowledge Gap'
@@ -42,32 +43,32 @@ export const AiAssistantPage: React.FC = () => {
     {
       label: 'Explain Simply',
       action: 'explain_simply',
-      prompt: `Explain ${activeConcept.shortName} simply for a ${student.level} student.`,
+      prompt: `Explain ${activeConcept.shortName} in ${activeSubject.name} simply for a ${student.level} student.`,
     },
     {
       label: 'Give Example',
       action: 'give_example',
-      prompt: `Provide a step-by-step C code example for ${activeConcept.shortName}.`,
+      prompt: `Provide a step-by-step ${activeSubject.name} example for ${activeConcept.shortName}.`,
     },
     {
       label: 'Give Me a Hint',
       action: 'give_hint',
-      prompt: `Give me a progressive conceptual hint for ${activeConcept.shortName}.`,
+      prompt: `Give me a progressive conceptual hint for ${activeConcept.shortName} in ${activeSubject.name}.`,
     },
     {
       label: 'Explain My Mistake',
       action: 'explain_mistake',
-      prompt: `Explain my recent mistake pattern (${activeConcept.deficitLabel}) in ${activeConcept.shortName}.`,
+      prompt: `Explain my recent mistake pattern (${activeConcept.deficitLabel}) in ${activeConcept.shortName} (${activeSubject.name}).`,
     },
     {
       label: 'Summarize This',
       action: 'summarize',
-      prompt: `Summarize the most important rules of ${activeConcept.shortName} in C.`,
+      prompt: `Summarize the most important rules of ${activeConcept.shortName} in ${activeSubject.name}.`,
     },
     {
       label: 'Practice Question',
       action: 'practice_question',
-      prompt: `Give me a targeted practice question on ${activeConcept.shortName}.`,
+      prompt: `Give me a targeted practice question on ${activeConcept.shortName} in ${activeSubject.name}.`,
     },
   ];
 
@@ -119,7 +120,9 @@ export const AiAssistantPage: React.FC = () => {
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">Subject:</span>
-            <span className="font-semibold text-slate-900">{student.subject}</span>
+            <span className="font-semibold text-slate-900">
+              {activeSubject.name} ({activeSubject.code})
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">Topic Mastery:</span>
@@ -161,7 +164,7 @@ export const AiAssistantPage: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
             <div className="text-xs font-bold text-[#B59024]">
-              Personalized AI Learning Assistant
+              Personalized AI Learning Assistant · {activeSubject.name} ({activeSubject.code})
             </div>
             <h2 className="text-xl font-bold text-slate-900 mt-0.5">
               VidyaOrbit AI Tutor — {activeConcept.name}
@@ -206,14 +209,14 @@ export const AiAssistantPage: React.FC = () => {
               type="button"
               onClick={() =>
                 sendTutorMessage(
-                  'What is recursion and how does the base case prevent stack overflow?',
+                  `How does ${activeConcept.shortName} connect to prerequisite and advanced topics in ${activeSubject.name}?`,
                   'explain_simply',
-                  'functions'
+                  activeConcept.id
                 )
               }
               className="px-3.5 py-2 rounded-xl bg-[#FBF7E8] border border-[#D4AF37]/50 text-xs font-bold text-[#B59024] hover:bg-[#D4AF37]/20 transition-all"
             >
-              Ask: “What is recursion?”
+              Ask: “How does {activeConcept.shortName} connect in {activeSubject.code}?”
             </button>
           </div>
         </div>
@@ -318,20 +321,21 @@ export const AiAssistantPage: React.FC = () => {
 };
 
 export const ProgressDashboardPage: React.FC = () => {
-  const { conceptStates, attempts, overallMastery, setRoute, setActiveConceptId } = useLearning();
+  const { activeSubject, conceptStates, attempts, overallMastery, setRoute, setActiveConceptId } =
+    useLearning();
 
   return (
     <div className="space-y-8 pb-16">
       <section className="p-6 md:p-8 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-1.5">
           <div className="text-xs font-bold text-[#B59024]">
-            Your Learning Progress
+            Your Learning Progress · {activeSubject.name} ({activeSubject.code})
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">
-            Progress &amp; Practice History
+            {activeSubject.name} — Performance &amp; Practice History
           </h1>
           <p className="text-sm text-slate-600">
-            See how your topic scores have improved and review your recent quiz attempts.
+            See how your {activeSubject.name} topic scores have improved and review your subject-specific attempts.
           </p>
         </div>
 
@@ -454,13 +458,16 @@ export const ProgressDashboardPage: React.FC = () => {
 export const StudentProfilePage: React.FC = () => {
   const {
     student,
+    activeSubject,
     overallMastery,
     conceptStates,
+    recommendedNextStep,
     applyDemoPreset,
     setRoute,
   } = useLearning();
 
   const masteredNodes = conceptStates.filter((c) => c.rawClassification === 'Mastered');
+  const lockedNode = conceptStates.find((c) => c.isRestrictedByPrerequisite);
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-16">
@@ -503,7 +510,7 @@ export const StudentProfilePage: React.FC = () => {
           <div className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
             {masteredNodes.length} / {conceptStates.length}
           </div>
-          <div className="text-xs text-slate-500">C Programming</div>
+          <div className="text-xs text-slate-500">{activeSubject.name}</div>
         </div>
         <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-1 shadow-2xs">
           <div className="text-xs text-slate-500">Explanation Style</div>
@@ -528,10 +535,10 @@ export const StudentProfilePage: React.FC = () => {
             className="p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-[#D4AF37] text-left space-y-1.5"
           >
             <div className="text-xs font-bold text-[#B59024]">
-              1. Initial Diagnostic (68%)
+              1. Initial Diagnostic ({activeSubject.code})
             </div>
             <p className="text-[11px] text-slate-600">
-              Functions is Weak (52%) and locks Pointers (31%). Recommended next: Revise Functions.
+              Resets {activeSubject.name} to initial diagnostic baseline with {recommendedNextStep?.shortName} as recommended focus.
             </p>
           </button>
 
@@ -541,10 +548,10 @@ export const StudentProfilePage: React.FC = () => {
             className="p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-[#D4AF37] text-left space-y-1.5"
           >
             <div className="text-xs font-bold text-slate-900">
-              2. Functions Revised (72%)
+              2. Core Topics Revised (74%+)
             </div>
             <p className="text-[11px] text-slate-600">
-              Functions crosses 60% → Pointers unlocks and becomes your next recommended step!
+              Prerequisite topics cross 60% → {lockedNode ? lockedNode.shortName : 'advanced units'} unlock and become your next step!
             </p>
           </button>
 
@@ -554,10 +561,10 @@ export const StudentProfilePage: React.FC = () => {
             className="p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-[#D4AF37] text-left space-y-1.5"
           >
             <div className="text-xs font-bold text-slate-900">
-              3. Advanced Mastery (85%)
+              3. Advanced Mastery (85%+)
             </div>
             <p className="text-[11px] text-slate-600">
-              7/9 topics Mastered; Pointers at 78%; Structures unlocked.
+              Most {activeSubject.name} topics Mastered; all advanced syllabus concepts unlocked.
             </p>
           </button>
         </div>

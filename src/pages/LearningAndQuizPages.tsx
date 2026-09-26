@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Play,
   Lightbulb,
@@ -10,16 +10,17 @@ import {
   Minus,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
-import { CONCEPT_LESSONS, QUESTION_BANK } from '../data/curriculumData';
 import { evaluateAdaptiveDifficulty } from '../engine/deterministicEngine';
 import { ConceptId, Difficulty, StudentLevel } from '../types/learning';
 import { AudioTranscribeMicButton } from '../components/VoiceAndAudioControls';
 
 export const LearningContentPage: React.FC = () => {
   const {
+    activeSubject,
     conceptStates,
     activeConceptId,
     setActiveConceptId,
+    getLessonForConcept,
     student,
     updateStudent,
     setRoute,
@@ -31,9 +32,9 @@ export const LearningContentPage: React.FC = () => {
 
   const currentConceptState =
     conceptStates.find((c) => c.id === activeConceptId) ||
-    conceptStates.find((c) => c.id === 'functions')!;
+    conceptStates[0];
 
-  const lessonData = CONCEPT_LESSONS[currentConceptState.id] || CONCEPT_LESSONS.functions;
+  const lessonData = getLessonForConcept(currentConceptState.id);
   const levelContent = lessonData.levels[student.level] || lessonData.levels.Beginner;
 
   const [codeOutputVisible, setCodeOutputVisible] = useState<boolean>(true);
@@ -72,8 +73,8 @@ export const LearningContentPage: React.FC = () => {
       {/* LEFT COLUMN: Topic Navigation (3 cols) */}
       <aside className="lg:col-span-3 p-5 rounded-2xl bg-white border border-slate-200 space-y-5 lg:sticky lg:top-22 shadow-2xs">
         <div className="space-y-1 border-b border-slate-100 pb-3">
-          <div className="text-xs font-bold text-[#B59024]">Course Topics</div>
-          <h2 className="text-base font-bold text-slate-900">C Programming</h2>
+          <div className="text-xs font-bold text-[#B59024]">Course Topics · {activeSubject.code}</div>
+          <h2 className="text-base font-bold text-slate-900">{activeSubject.name}</h2>
         </div>
 
         <div className="space-y-1.5">
@@ -117,7 +118,7 @@ export const LearningContentPage: React.FC = () => {
               2. Why they are used
             </a>
             <a href="#sec-syntax" className="block py-1 hover:text-[#B59024]">
-              3. C Syntax
+              3. Core Syntax &amp; Rules
             </a>
             <a href="#sec-example" className="block py-1 hover:text-[#B59024]">
               4. Code Example
@@ -187,7 +188,7 @@ export const LearningContentPage: React.FC = () => {
               onClick={() =>
                 handleQuickAiButton(
                   'give_example',
-                  `Show me another practical C code example for ${currentConceptState.shortName}.`
+                  `Show me another practical example for ${currentConceptState.shortName} in ${activeSubject.name}.`
                 )
               }
               className="px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#D4AF37] text-xs font-semibold text-slate-700 hover:text-slate-900 transition-all"
@@ -479,7 +480,10 @@ export const LearningContentPage: React.FC = () => {
 
 export const AdaptiveQuizPage: React.FC = () => {
   const {
+    activeSubject,
+    activeConceptId,
     setActiveConceptId,
+    subjectQuestions,
     adaptiveDifficulty,
     setAdaptiveDifficulty,
     recentQuizWindow,
@@ -500,11 +504,65 @@ export const AdaptiveQuizPage: React.FC = () => {
     recommendRevision: boolean;
   } | null>(null);
 
-  const matchingDifficultyQuestions = QUESTION_BANK.filter(
+  useEffect(() => {
+    setQuestionCursor(0);
+    setSelectedOption(null);
+    setHintStage(0);
+    setLastSubmissionFeedback(null);
+  }, [activeSubject.id, activeConceptId]);
+
+  if (subjectQuestions.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 pb-16">
+        <section className="p-8 rounded-2xl bg-white border border-slate-200 text-center space-y-4 shadow-2xs">
+          <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
+            {activeSubject.name} ({activeSubject.code})
+          </div>
+          <h1 className="text-2xl font-extrabold text-slate-900">
+            Diagnostic content for this subject is being prepared.
+          </h1>
+          <p className="text-sm text-slate-600 max-w-lg mx-auto">
+            No diagnostic or adaptive quiz questions are currently available for{' '}
+            <strong>{activeSubject.name}</strong>. You can still explore its syllabus units and open interactive topic lessons.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setRoute('learning-content')}
+              className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d]"
+            >
+              Open {activeSubject.name} Lessons
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoute('dashboard')}
+              className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  const conceptAndDifficultyQuestions = subjectQuestions.filter(
+    (q) => q.conceptId === activeConceptId && q.difficulty === adaptiveDifficulty
+  );
+  const conceptOnlyQuestions = subjectQuestions.filter(
+    (q) => q.conceptId === activeConceptId
+  );
+  const matchingDifficultyQuestions = subjectQuestions.filter(
     (q) => q.difficulty === adaptiveDifficulty
   );
   const pool =
-    matchingDifficultyQuestions.length > 0 ? matchingDifficultyQuestions : QUESTION_BANK;
+    conceptAndDifficultyQuestions.length > 0
+      ? conceptAndDifficultyQuestions
+      : conceptOnlyQuestions.length > 0
+      ? conceptOnlyQuestions
+      : matchingDifficultyQuestions.length > 0
+      ? matchingDifficultyQuestions
+      : subjectQuestions;
   const currentQuestion = pool[questionCursor % pool.length];
 
   const handleRevealHint = (stage: number) => {
@@ -563,13 +621,13 @@ export const AdaptiveQuizPage: React.FC = () => {
       <section className="p-6 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-1">
           <div className="text-xs font-bold text-[#B59024]">
-            Adaptive Practice
+            {activeSubject.name} ({activeSubject.code}) · Adaptive Practice
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900">
             Adaptive Quiz &amp; Step-by-Step Hints
           </h1>
           <p className="text-xs text-slate-600">
-            Question difficulty automatically adjusts based on your last 5 answers.
+            Question difficulty automatically adjusts based on your last 5 answers in {activeSubject.name}.
           </p>
         </div>
 

@@ -9,7 +9,6 @@ import {
   Bot,
   ShieldCheck,
   Sparkles,
-  Play,
   ChevronRight,
   ChevronLeft,
   Eye,
@@ -24,8 +23,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
-import { BrandLogo, GlobalHeader } from '../components/AppShell';
-import { C_CONCEPT_DEFINITIONS } from '../data/curriculumData';
+import { GlobalHeader } from '../components/AppShell';
 import { ConceptId, StudentLevel } from '../types/learning';
 
 export const LandingPage: React.FC = () => {
@@ -431,15 +429,10 @@ export const AuthPage: React.FC<{ mode: 'login' | 'signup' }> = ({ mode }) => {
           confirmPassword,
         });
         if (!result.ok) {
-          setErrorMsg(result.error || 'Could not create your student account.');
+          setErrorMsg(result.error || 'Unable to send verification email. Please try again.');
         } else {
-          setRegistrationComplete(true);
-          setSuccessMsg(
-            result.message || 'Account created. Please check your email to verify your account.'
-          );
-          if (result.previewToken) {
-            setPreviewVerificationToken(result.previewToken);
-          }
+          setAuthEmailContext(email.trim().toLowerCase());
+          setRoute('verify-email');
         }
       }
     } finally {
@@ -792,7 +785,7 @@ export const AuthPage: React.FC<{ mode: 'login' | 'signup' }> = ({ mode }) => {
   );
 };
 
-// --- Email Verification Page ---
+// --- Email Verification Page (6-Digit OTP) ---
 
 export const VerifyEmailPage: React.FC = () => {
   const {
@@ -805,27 +798,44 @@ export const VerifyEmailPage: React.FC = () => {
     resendVerificationEmail,
   } = useLearning();
 
-  const [tokenInput, setTokenInput] = useState(authTokenParam || '');
+  const [otpInput, setOtpInput] = useState(
+    authTokenParam && /^\d{6}$/.test(authTokenParam) ? authTokenParam : ''
+  );
   const [emailInput, setEmailInput] = useState(authEmailContext || '');
   const [status, setStatus] = useState<'idle' | 'verifying' | 'verified' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [errorCode, setErrorCode] = useState<string | undefined>();
   const [isResending, setIsResending] = useState(false);
   const [resendFeedback, setResendFeedback] = useState('');
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
 
-  // Automatically verify if a token was supplied via URL query parameter or registration state
   useEffect(() => {
-    if (authTokenParam) {
-      setTokenInput(authTokenParam);
-      handleVerifyToken(authTokenParam);
+    if (authEmailContext && !emailInput) {
+      setEmailInput(authEmailContext);
     }
-  }, [authTokenParam]);
+  }, [authEmailContext]);
 
-  const handleVerifyToken = async (tokenToVerify: string) => {
-    const clean = tokenToVerify.trim();
-    if (!clean) {
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownSeconds]);
+
+  const handleVerifyOtp = async (codeToVerify: string) => {
+    const cleanCode = codeToVerify.trim().replace(/\s+/g, '');
+    const cleanEmail = (emailInput || authEmailContext || '').trim().toLowerCase();
+
+    if (!cleanEmail) {
       setStatus('error');
-      setMessage('Please enter or open a valid verification link.');
+      setMessage('Please enter the student email address you registered with.');
+      return;
+    }
+
+    if (!cleanCode || !/^\d{6}$/.test(cleanCode)) {
+      setStatus('error');
+      setMessage('Incorrect verification code. Please enter your 6-digit OTP.');
       return;
     }
 
@@ -833,15 +843,15 @@ export const VerifyEmailPage: React.FC = () => {
     setMessage('');
     setResendFeedback('');
 
-    const result = await verifyStudentEmail(clean);
+    const result = await verifyStudentEmail(cleanCode, cleanEmail);
     if (result.ok) {
       setStatus('verified');
-      setMessage(result.message || 'Your email has been verified successfully.');
+      setMessage(result.message || 'Email verified successfully.');
       setAuthTokenParam('');
     } else {
       setStatus('error');
       setErrorCode(result.code);
-      setMessage(result.error || 'This verification link has expired. Request a new one.');
+      setMessage(result.error || 'Incorrect verification code. Please try again.');
       if (result.email) {
         setEmailInput(result.email);
       }
@@ -849,24 +859,33 @@ export const VerifyEmailPage: React.FC = () => {
   };
 
   const handleResend = async () => {
-    const targetEmail = emailInput.trim() || authEmailContext.trim();
-    if (!targetEmail || isResending) return;
+    const targetEmail = (emailInput || authEmailContext || '').trim().toLowerCase();
+    if (!targetEmail) {
+      setStatus('error');
+      setMessage('Please enter your registered student email address to resend OTP.');
+      return;
+    }
+    if (isResending || cooldownSeconds > 0) return;
 
     setIsResending(true);
     setResendFeedback('');
+    setMessage('');
     try {
       const res = await resendVerificationEmail(targetEmail);
       if (res.ok) {
         setAuthEmailContext(targetEmail);
+        setStatus('idle');
+        setOtpInput('');
+        setCooldownSeconds(res.retryAfterSeconds ?? 30);
         setResendFeedback(
-          res.message || 'A new verification email has been sent. Please check your inbox.'
+          res.message || 'A new 6-digit verification code has been sent to your email.'
         );
-        if (res.previewToken) {
-          setTokenInput(res.previewToken);
-        }
       } else {
         setStatus('error');
-        setMessage(res.error || 'Your verification email could not be sent. Please try again.');
+        if (res.retryAfterSeconds) {
+          setCooldownSeconds(res.retryAfterSeconds);
+        }
+        setMessage(res.error || 'Unable to send verification email. Please try again.');
       }
     } finally {
       setIsResending(false);
@@ -885,19 +904,29 @@ export const VerifyEmailPage: React.FC = () => {
               <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
                 VidyaOrbit
               </div>
-              <h1 className="text-2xl font-bold text-slate-900">Email Verification</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Verify Your Email</h1>
             </div>
           </div>
           <p className="text-sm text-slate-600 leading-relaxed">
-            Confirm your student email address to activate your VidyaOrbit account.
+            We sent a 6-digit verification code to your email
+            {(emailInput || authEmailContext) ? (
+              <>
+                {' '}
+                (<span className="font-mono font-semibold text-slate-900">{emailInput || authEmailContext}</span>)
+              </>
+            ) : null}
+            .
           </p>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#FBF7E8] border border-[#D4AF37]/50 text-xs font-semibold text-[#B59024]">
+            <span>⏱️ Your verification code expires in 5 minutes. (OTP expires in 5 minutes.)</span>
+          </div>
         </div>
 
         {status === 'verifying' && (
           <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center text-center space-y-3">
             <Loader2 className="w-7 h-7 text-[#B59024] animate-spin" />
             <div className="text-sm font-semibold text-slate-800">
-              Verifying your student account...
+              Verifying your 6-digit code...
             </div>
           </div>
         )}
@@ -909,77 +938,54 @@ export const VerifyEmailPage: React.FC = () => {
               <div className="space-y-1">
                 <div className="text-sm font-bold text-slate-900">{message}</div>
                 <p className="text-xs text-slate-700 leading-relaxed">
-                  Your student account is now active. You can sign in to access your diagnostic
-                  tests, syllabus, and AI Tutor.
+                  Your student account is now active. You can continue directly to your VidyaOrbit
+                  Dashboard or Login page.
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setRoute('login')}
-              className="w-full h-11 rounded-xl bg-[#D4AF37] text-slate-950 font-bold text-sm hover:bg-[#c59f2d] transition-colors flex items-center justify-center gap-2"
-            >
-              <span>Continue to Login</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <button
+                type="button"
+                onClick={() => setRoute('dashboard')}
+                className="flex-1 h-11 rounded-xl bg-[#D4AF37] text-slate-950 font-bold text-sm hover:bg-[#c59f2d] transition-colors flex items-center justify-center gap-2"
+              >
+                <span>Continue to Dashboard</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoute('login')}
+                className="px-4 h-11 rounded-xl bg-white border border-slate-200 text-slate-800 font-semibold text-xs hover:bg-slate-50 transition-colors"
+              >
+                Go to Login
+              </button>
+            </div>
           </div>
         )}
 
         {status === 'error' && (
           <div
             role="alert"
-            className="p-4 rounded-xl bg-red-50 border border-red-200 space-y-3 text-xs text-red-800"
+            className="p-4 rounded-xl bg-red-50 border border-red-200 space-y-2 text-xs text-red-800"
           >
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-bold">{message}</div>
-                {errorCode === 'USED_TOKEN' && (
+                {errorCode === 'EXPIRED_OTP' && (
                   <p className="text-red-700">
-                    If you already verified your account, you can continue directly to Student Login.
+                    Click &ldquo;Resend OTP&rdquo; below to receive a fresh 6-digit verification code.
                   </p>
                 )}
-              </div>
-            </div>
-
-            <div className="pt-2 space-y-2 border-t border-red-200/80">
-              <label className="block text-xs font-semibold text-slate-800">
-                Student Email for New Verification Link
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="student@university.edu"
-                  className="flex-1 h-10 px-3 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 outline-none focus:border-[#D4AF37]"
-                />
-                <button
-                  type="button"
-                  disabled={isResending || !emailInput.trim()}
-                  onClick={handleResend}
-                  className="px-4 h-10 rounded-lg bg-[#D4AF37] text-slate-950 font-bold text-xs hover:bg-[#c59f2d] disabled:opacity-60 whitespace-nowrap"
-                >
-                  {isResending ? 'Sending...' : 'Resend Verification Email'}
-                </button>
               </div>
             </div>
           </div>
         )}
 
         {resendFeedback && (
-          <div className="p-3.5 rounded-xl bg-[#FBF7E8] border border-[#D4AF37] text-xs text-slate-900 space-y-2">
+          <div className="p-3.5 rounded-xl bg-[#FBF7E8] border border-[#D4AF37] text-xs text-slate-900">
             <div className="font-semibold">{resendFeedback}</div>
-            {tokenInput && status !== 'verified' && (
-              <button
-                type="button"
-                onClick={() => handleVerifyToken(tokenInput)}
-                className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-slate-950 font-bold text-xs hover:bg-[#c59f2d] transition-colors"
-              >
-                Click Here to Verify with New Link
-              </button>
-            )}
           </div>
         )}
 
@@ -987,30 +993,79 @@ export const VerifyEmailPage: React.FC = () => {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleVerifyToken(tokenInput);
+              handleVerifyOtp(otpInput);
             }}
             className="space-y-4 pt-2 border-t border-slate-100"
           >
             <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-800">
-                Verification Token
+              <label
+                htmlFor="verify-email-address"
+                className="block text-xs font-semibold text-slate-800"
+              >
+                Student Email
               </label>
               <input
-                type="text"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="Paste verification token from your email"
-                className="w-full h-11 px-3.5 rounded-lg bg-white border border-slate-300 focus:border-[#D4AF37] outline-none text-xs font-mono text-slate-900"
+                id="verify-email-address"
+                type="email"
+                required
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="student@example.com"
+                className="w-full h-11 px-3.5 rounded-lg bg-white border border-slate-300 focus:border-[#D4AF37] outline-none text-sm text-slate-900"
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={!tokenInput.trim()}
-              className="w-full h-11 rounded-xl bg-[#D4AF37] text-slate-950 font-bold text-sm hover:bg-[#c59f2d] disabled:opacity-60 transition-colors"
-            >
-              Verify Email
-            </button>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="verify-otp-code"
+                className="block text-xs font-semibold text-slate-800"
+              >
+                Enter OTP
+              </label>
+              <input
+                id="verify-otp-code"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                required
+                value={otpInput}
+                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="123456"
+                className="w-full h-12 px-4 rounded-xl bg-white border border-slate-300 focus:border-[#D4AF37] outline-none text-xl font-mono font-bold tracking-[0.4em] text-center text-slate-900"
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-1">
+              <button
+                type="submit"
+                disabled={otpInput.trim().length !== 6}
+                className="flex-1 h-11 rounded-xl bg-[#D4AF37] text-slate-950 font-bold text-sm hover:bg-[#c59f2d] disabled:opacity-60 transition-colors"
+              >
+                Verify Email
+              </button>
+
+              <button
+                type="button"
+                disabled={isResending || cooldownSeconds > 0}
+                onClick={handleResend}
+                className="px-5 h-11 rounded-xl bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs hover:bg-slate-200 disabled:opacity-60 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isResending ? 'animate-spin' : ''}`} />
+                <span>
+                  {isResending
+                    ? 'Sending...'
+                    : cooldownSeconds > 0
+                    ? `Resend OTP (${cooldownSeconds}s)`
+                    : 'Resend OTP'}
+                </span>
+              </button>
+            </div>
+
+            {cooldownSeconds > 0 && (
+              <p className="text-xs text-slate-500 text-center">
+                You can request another code in {cooldownSeconds} seconds.
+              </p>
+            )}
           </form>
         )}
 
@@ -1119,21 +1174,21 @@ export const ForgotPasswordPage: React.FC = () => {
               <span className="font-semibold leading-relaxed">{submittedMsg}</span>
             </div>
 
-            {previewResetToken && (
-              <div className="pt-2 border-t border-[#D4AF37]/30">
-                <button
-                  type="button"
-                  onClick={() => {
+            <div className="pt-2 border-t border-[#D4AF37]/30">
+              <button
+                type="button"
+                onClick={() => {
+                  if (previewResetToken) {
                     setAuthTokenParam(previewResetToken);
-                    setRoute('reset-password');
-                  }}
-                  className="w-full py-2.5 px-3.5 rounded-lg bg-[#D4AF37] text-slate-950 font-bold text-xs hover:bg-[#c59f2d] flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <KeyRound className="w-4 h-4" />
-                  <span>Open Password Reset Link</span>
-                </button>
-              </div>
-            )}
+                  }
+                  setRoute('reset-password');
+                }}
+                className="w-full py-2.5 px-3.5 rounded-lg bg-[#D4AF37] text-slate-950 font-bold text-xs hover:bg-[#c59f2d] flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>Enter 6-Digit Password Reset Code →</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -1315,16 +1370,18 @@ export const ResetPasswordPage: React.FC = () => {
             {!authTokenParam && (
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-800">
-                  Reset Token
+                  6-Digit Password Reset Code (OTP)
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  maxLength={6}
                   required
                   disabled={isLoading}
                   value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Paste reset token from your email"
-                  className="w-full h-11 px-3.5 rounded-lg bg-white border border-slate-300 focus:border-[#D4AF37] outline-none text-xs font-mono text-slate-900"
+                  onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit code from your email"
+                  className="w-full h-11 px-3.5 rounded-lg bg-white border border-slate-300 focus:border-[#D4AF37] outline-none text-sm font-mono font-bold tracking-widest text-slate-900"
                 />
               </div>
             )}
@@ -1445,6 +1502,7 @@ export const OnboardingPage: React.FC = () => {
     setRoute,
     subjects,
     activeSubject,
+    conceptStates,
     selectEngineeringSubject,
   } = useLearning();
   const [step, setStep] = useState<number>(1);
@@ -1562,10 +1620,10 @@ export const OnboardingPage: React.FC = () => {
 
             <div className="space-y-2.5">
               <div className="text-xs font-semibold text-slate-700">
-                Included Core Diagnostic Concepts ({selectedTopics.length} selected):
+                Included Core Diagnostic Concepts for {activeSubject.name} ({conceptStates.length} topics):
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {C_CONCEPT_DEFINITIONS.map((topic) => {
+                {conceptStates.map((topic) => {
                   const checked = selectedTopics.includes(topic.id);
                   return (
                     <button
@@ -1605,15 +1663,15 @@ export const OnboardingPage: React.FC = () => {
               <div className="text-xs font-bold text-[#B59024]">Step 2 of 4</div>
               <h1 className="text-2xl font-bold text-slate-900 mt-1">What is your learning goal?</h1>
               <p className="text-sm text-slate-600 mt-1">
-                We use your goal to tailor your examples and practice exercises.
+                We use your goal to tailor your {activeSubject.name} examples and practice exercises.
               </p>
             </div>
 
             <div className="space-y-3">
               {[
-                'Learn C Programming fundamentals and master memory management.',
-                'Prepare for college exams and coding lab assignments.',
-                'Strengthen weak areas like Functions, Pointers, and Structures.',
+                `Master ${activeSubject.name} fundamentals and core concepts.`,
+                `Prepare for ${activeSubject.code} college exams and lab assignments.`,
+                `Strengthen weak areas and unlock advanced topics in ${activeSubject.name}.`,
               ].map((presetGoal) => (
                 <button
                   key={presetGoal}
@@ -1668,15 +1726,15 @@ export const OnboardingPage: React.FC = () => {
                 [
                   {
                     lvl: 'Beginner' as StudentLevel,
-                    desc: 'New to C programming. Use everyday analogies and simple step-by-step code walkthroughs.',
+                    desc: `New to ${activeSubject.name}. Use everyday analogies and simple step-by-step walkthroughs.`,
                   },
                   {
                     lvl: 'Intermediate' as StudentLevel,
-                    desc: 'Know basic variables and loops, but want more practice with Functions and Pointers.',
+                    desc: `Know foundational ${activeSubject.name} concepts, and want more practice with core & advanced syllabus topics.`,
                   },
                   {
                     lvl: 'Advanced' as StudentLevel,
-                    desc: 'Familiar with C syntax. Focus on memory addresses, stack frames, and tricky edge cases.',
+                    desc: `Familiar with ${activeSubject.name} fundamentals. Focus on deep analysis, optimization, and tricky edge cases.`,
                   },
                 ]
               ).map((item) => (

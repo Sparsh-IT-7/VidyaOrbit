@@ -606,20 +606,19 @@ export const SubjectManagementPage: React.FC = () => {
                               {topic.estimatedMinutes}m
                             </span>
 
-                            {topic.mappedConceptId && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  selectEngineeringSubject(inspectedSubject.id);
-                                  setActiveConceptId(topic.mappedConceptId!);
-                                  setRoute('learning-content');
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-[#FBF7E8] border border-[#D4AF37]/50 text-[11px] font-bold text-[#B59024] hover:bg-[#D4AF37]/25 flex items-center gap-1"
-                              >
-                                <span>Open Lesson</span>
-                                <ArrowRight className="w-3 h-3" />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetConceptId = topic.mappedConceptId || topic.id;
+                                selectEngineeringSubject(inspectedSubject.id);
+                                setActiveConceptId(targetConceptId, inspectedSubject.id);
+                                setRoute('learning-content');
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[#FBF7E8] border border-[#D4AF37]/50 text-[11px] font-bold text-[#B59024] hover:bg-[#D4AF37]/25 flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <span>Open Lesson</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
                           </div>
                         </div>
                       ))}

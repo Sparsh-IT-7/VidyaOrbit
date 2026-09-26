@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowRight,
   Terminal,
@@ -11,15 +11,11 @@ import {
   RotateCcw,
   Code2,
   Send,
-  Timer,
   CheckCircle2,
   Sparkles,
-  BookOpen,
-  ImagePlus,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
-import { BrandLogo, CUSTOM_LOGO_STORAGE_KEY, UserAvatar } from '../components/AppShell';
-import { QUESTION_BANK } from '../data/curriculumData';
+import { BrandLogo, UserAvatar } from '../components/AppShell';
 import { ConceptId } from '../types/learning';
 import {
   AudioTranscribeMicButton,
@@ -34,6 +30,7 @@ export const DashboardPage: React.FC = () => {
   const {
     student,
     activeSubject,
+    subjectQuestions,
     conceptStates,
     overallMastery,
     recommendedNextStep,
@@ -48,9 +45,26 @@ export const DashboardPage: React.FC = () => {
     thresholds,
   } = useLearning();
 
-  const dashboardQuestions = QUESTION_BANK.filter(
-    (q) => q.conceptId === 'functions' || q.conceptId === 'pointers' || q.conceptId === 'loops'
-  );
+  const dashboardQuestions =
+    subjectQuestions.filter(
+      (q) =>
+        q.conceptId === recommendedNextStep?.id ||
+        conceptStates.some(
+          (c) =>
+            (c.rawClassification === 'Weak' || c.rawClassification === 'Knowledge Gap') &&
+            c.id === q.conceptId
+        )
+    ).length > 0
+      ? subjectQuestions.filter(
+          (q) =>
+            q.conceptId === recommendedNextStep?.id ||
+            conceptStates.some(
+              (c) =>
+                (c.rawClassification === 'Weak' || c.rawClassification === 'Knowledge Gap') &&
+                c.id === q.conceptId
+            )
+        )
+      : subjectQuestions;
   const [quizIndex, setQuizIndex] = useState<number>(0);
   const [selectedOption, setSelectedOption] = useState<number>(1);
   const [submittedFeedback, setSubmittedFeedback] = useState<{
@@ -61,44 +75,17 @@ export const DashboardPage: React.FC = () => {
   const [tutorInput, setTutorInput] = useState<string>('');
   const [sandboxOpen, setSandboxOpen] = useState<boolean>(false);
   const [cohortOpen, setCohortOpen] = useState<boolean>(false);
-  const [hasCustomLogo, setHasCustomLogo] = useState<boolean>(() => {
-    try {
-      return Boolean(localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY));
-    } catch {
-      return false;
-    }
-  });
 
-  const handleDashboardLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        try {
-          localStorage.setItem(CUSTOM_LOGO_STORAGE_KEY, reader.result);
-          window.dispatchEvent(new Event('vidyaorbit-logo-change'));
-          setHasCustomLogo(true);
-        } catch {
-          // ignore storage quota errors
-        }
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
+  useEffect(() => {
+    setQuizIndex(0);
+    setSelectedOption(0);
+    setSubmittedFeedback(null);
+  }, [activeSubject.id]);
 
-  const handleResetDashboardLogo = () => {
-    try {
-      localStorage.removeItem(CUSTOM_LOGO_STORAGE_KEY);
-      window.dispatchEvent(new Event('vidyaorbit-logo-change'));
-      setHasCustomLogo(false);
-    } catch {
-      // ignore storage errors
-    }
-  };
-
-  const currentQuestion = dashboardQuestions[quizIndex % dashboardQuestions.length];
+  const currentQuestion =
+    dashboardQuestions.length > 0
+      ? dashboardQuestions[quizIndex % dashboardQuestions.length]
+      : null;
 
   const handleSelectConcept = (
     conceptId: ConceptId,
@@ -109,6 +96,7 @@ export const DashboardPage: React.FC = () => {
   };
 
   const handleQuizSubmit = () => {
+    if (!currentQuestion) return;
     const isCorrect = selectedOption === currentQuestion.correctAnswerIndex;
     recordAttempt({
       questionId: currentQuestion.id,
@@ -128,6 +116,7 @@ export const DashboardPage: React.FC = () => {
   };
 
   const handleNextDashboardQuestion = () => {
+    if (dashboardQuestions.length === 0) return;
     setSubmittedFeedback(null);
     setQuizIndex((prev) => (prev + 1) % dashboardQuestions.length);
     setSelectedOption(0);
@@ -141,10 +130,29 @@ export const DashboardPage: React.FC = () => {
     await sendTutorMessage(msg);
   };
 
-  const variablesState = conceptStates.find((c) => c.id === 'variables')!;
-  const loopsState = conceptStates.find((c) => c.id === 'loops')!;
-  const functionsState = conceptStates.find((c) => c.id === 'functions')!;
-  const pointersState = conceptStates.find((c) => c.id === 'pointers')!;
+  const whatYouKnowNodes = conceptStates.slice(0, 5);
+  const primaryGapState =
+    conceptStates.find((c) => c.isRestrictedByPrerequisite) ||
+    conceptStates.find((c) => c.rawClassification === 'Knowledge Gap') ||
+    conceptStates.find((c) => c.rawClassification === 'Weak') ||
+    conceptStates[conceptStates.length - 1] ||
+    recommendedNextStep;
+  const blockingPrereqState =
+    conceptStates.find(
+      (c) =>
+        c.shortName === primaryGapState?.blockingPrerequisiteName ||
+        c.name === primaryGapState?.blockingPrerequisiteName ||
+        (primaryGapState?.prerequisites && primaryGapState.prerequisites.includes(c.id))
+    ) ||
+    recommendedNextStep ||
+    conceptStates[0];
+  const nextDependentState =
+    conceptStates.find((c) => recommendedNextStep?.dependents.includes(c.id)) ||
+    primaryGapState;
+  const recentImprovementNodes = (() => {
+    const withDelta = conceptStates.filter((c) => c.mastery !== c.previousMastery);
+    return (withDelta.length >= 3 ? withDelta : conceptStates).slice(0, 3);
+  })();
 
   const masteredCount = conceptStates.filter((c) => c.rawClassification === 'Mastered').length;
 
@@ -164,28 +172,6 @@ export const DashboardPage: React.FC = () => {
             <span className="hidden sm:inline-block text-xs text-slate-500 font-medium border-l border-slate-200 pl-3">
               Student Learning Dashboard
             </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-[#D4AF37] text-xs font-semibold text-slate-700 transition-colors">
-              <ImagePlus className="w-3.5 h-3.5 text-[#B59024]" />
-              <span>{hasCustomLogo ? 'Change Logo Image' : 'Upload Official Logo'}</span>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleDashboardLogoUpload}
-                className="hidden"
-              />
-            </label>
-            {hasCustomLogo && (
-              <button
-                type="button"
-                onClick={handleResetDashboardLogo}
-                className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-medium text-slate-600 transition-colors"
-              >
-                Reset
-              </button>
-            )}
           </div>
         </div>
 
@@ -213,14 +199,27 @@ export const DashboardPage: React.FC = () => {
             </h1>
 
             <p className="text-sm md:text-base text-slate-600 leading-relaxed">
-              Your overall mastery is{' '}
-              <span className="text-slate-900 font-bold tabular-nums">{overallMastery}%</span>. You
-              are just{' '}
-              <span className="text-[#B59024] font-bold">
-                {Math.max(0, thresholds.developingMin - functionsState.mastery)}% away in{' '}
-                {functionsState.shortName}
-              </span>{' '}
-              from unlocking <span className="text-slate-900 font-semibold">Pointers</span>.
+              Your overall mastery in <strong className="text-slate-900">{activeSubject.name}</strong> is{' '}
+              <span className="text-slate-900 font-bold tabular-nums">{overallMastery}%</span>.{' '}
+              {primaryGapState?.isRestrictedByPrerequisite ? (
+                <>
+                  You are just{' '}
+                  <span className="text-[#B59024] font-bold">
+                    {Math.max(0, thresholds.developingMin - blockingPrereqState.mastery)}% away in{' '}
+                    {blockingPrereqState.shortName}
+                  </span>{' '}
+                  from unlocking{' '}
+                  <span className="text-slate-900 font-semibold">{primaryGapState.shortName}</span>.
+                </>
+              ) : (
+                <>
+                  Recommended focus:{' '}
+                  <span className="text-[#B59024] font-bold">
+                    {recommendedNextStep.shortName} ({recommendedNextStep.mastery}%)
+                  </span>{' '}
+                  to strengthen <span className="text-slate-900 font-semibold">{recommendedNextStep.deficitLabel}</span>.
+                </>
+              )}
             </p>
 
             {/* Primary CTA Buttons */}
@@ -287,7 +286,9 @@ export const DashboardPage: React.FC = () => {
                 {masteredCount} of {conceptStates.length} Topics Mastered
               </div>
               <div className="text-xs text-[#B59024] font-semibold pt-0.5">
-                Next Unlock: Pointers ({pointersState.mastery}%)
+                {primaryGapState?.isRestrictedByPrerequisite
+                  ? `Next Unlock: ${primaryGapState.shortName} (${primaryGapState.mastery}%)`
+                  : `Focus Area: ${recommendedNextStep.shortName} (${recommendedNextStep.mastery}%)`}
               </div>
               <button
                 type="button"
@@ -307,19 +308,21 @@ export const DashboardPage: React.FC = () => {
         <div className="vo-card-hover p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>1. What Do I Know?</span>
-              <span className="font-semibold text-[#B59024]">Your Knowledge</span>
+              <span>1. What You Know</span>
+              <span className="font-semibold text-[#B59024]">{activeSubject.code}</span>
             </div>
-            <div className="text-base font-bold text-slate-900">Topic Mastery</div>
+            <div className="text-base font-bold text-slate-900">
+              {activeSubject.name} Mastery
+            </div>
           </div>
 
           <div className="space-y-2.5">
-            {[variablesState, loopsState, functionsState, pointersState].map((c) => (
+            {whatYouKnowNodes.map((c) => (
               <div key={c.id} className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-700 font-medium">{c.shortName}</span>
+                  <span className="text-slate-700 font-medium truncate pr-2">{c.shortName}</span>
                   <span
-                    className={`font-mono font-bold tabular-nums ${
+                    className={`font-mono font-bold tabular-nums shrink-0 ${
                       c.mastery >= thresholds.developingMin ? 'text-emerald-700' : 'text-[#B59024]'
                     }`}
                   >
@@ -343,7 +346,7 @@ export const DashboardPage: React.FC = () => {
             onClick={() => setRoute('knowledge-map')}
             className="text-xs text-[#B59024] hover:underline font-bold flex items-center gap-1"
           >
-            <span>See All 9 Topics</span>
+            <span>See All {conceptStates.length} {activeSubject.name} Topics</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -356,7 +359,7 @@ export const DashboardPage: React.FC = () => {
               <AlertTriangle className="w-4 h-4 text-[#B59024]" />
             </div>
             <div className="text-base font-bold text-slate-900">
-              Knowledge Gap: {pointersState.shortName}
+              {primaryGapState.status}: {primaryGapState.shortName}
             </div>
           </div>
 
@@ -364,25 +367,25 @@ export const DashboardPage: React.FC = () => {
             <div className="flex justify-between">
               <span className="text-slate-500">Current Mastery:</span>
               <span className="font-mono font-bold text-[#B59024] tabular-nums">
-                {pointersState.mastery}%
+                {primaryGapState.mastery}%
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Required First:</span>
-              <span className="font-semibold text-slate-900">{functionsState.shortName}</span>
+              <span className="font-semibold text-slate-900">{blockingPrereqState.shortName}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Functions Score:</span>
+              <span className="text-slate-500">{blockingPrereqState.shortName} Score:</span>
               <span className="font-mono font-bold text-slate-900 tabular-nums">
-                {functionsState.mastery}% (Needs {thresholds.developingMin}%)
+                {blockingPrereqState.mastery}% (Needs {thresholds.developingMin}%)
               </span>
             </div>
           </div>
 
           <p className="text-xs text-slate-600 leading-relaxed">
-            {pointersState.isRestrictedByPrerequisite
-              ? 'Pointers is locked until your Functions score reaches 60%.'
-              : `Functions is at ${functionsState.mastery}%, so Pointers is now unlocked!`}
+            {primaryGapState.isRestrictedByPrerequisite
+              ? `${primaryGapState.shortName} is locked until your ${blockingPrereqState.shortName} score reaches ${thresholds.developingMin}%.`
+              : `Focus on ${primaryGapState.deficitLabel} to raise ${primaryGapState.shortName} above ${thresholds.developingMin}%.`}
           </p>
         </div>
 
@@ -390,7 +393,7 @@ export const DashboardPage: React.FC = () => {
         <div className="vo-card-hover p-5 rounded-2xl bg-[#FBF7E8]/70 border border-[#D4AF37] flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-[#B59024] font-bold">
-              <span>3 &amp; 4. What To Learn Next</span>
+              <span>3 &amp; 4. Revise &amp; Learn Next</span>
               <Sparkles className="w-4 h-4" />
             </div>
             <div className="text-lg font-bold text-slate-900">
@@ -401,12 +404,15 @@ export const DashboardPage: React.FC = () => {
           <div className="p-3.5 rounded-xl bg-white border border-[#D4AF37]/40 space-y-1">
             <div className="text-[11px] font-bold text-[#B59024]">Why this is recommended:</div>
             <p className="text-xs text-slate-700 leading-relaxed">
-              Your {recommendedNextStep.shortName} mastery is currently{' '}
+              Your {recommendedNextStep.shortName} mastery in {activeSubject.name} is currently{' '}
               <span className="font-mono font-bold text-slate-900">
                 {recommendedNextStep.mastery}%
               </span>
               , and it is needed before moving on to{' '}
-              {recommendedNextStep.dependents.includes('pointers') ? 'Pointers' : 'the next topic'}.
+              <span className="font-semibold text-slate-900">
+                {nextDependentState ? nextDependentState.shortName : 'advanced units'}
+              </span>
+              .
             </p>
           </div>
 
@@ -416,7 +422,7 @@ export const DashboardPage: React.FC = () => {
             className="w-full py-2.5 rounded-xl bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d] transition-all flex items-center justify-center gap-2 shadow-2xs"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Start Lesson</span>
+            <span>Start {recommendedNextStep.shortName} Lesson</span>
           </button>
         </div>
 
@@ -424,14 +430,14 @@ export const DashboardPage: React.FC = () => {
         <div className="vo-card-hover p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>5. Am I Improving?</span>
+              <span>5. Improvement ({activeSubject.code})</span>
               <TrendingUp className="w-4 h-4 text-emerald-600" />
             </div>
             <div className="text-base font-bold text-slate-900">Recent Improvement</div>
           </div>
 
           <div className="space-y-2.5">
-            {[functionsState, pointersState, variablesState].map((item) => {
+            {recentImprovementNodes.map((item) => {
               const delta = item.mastery - item.previousMastery;
               return (
                 <div
@@ -470,10 +476,10 @@ export const DashboardPage: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="text-xs text-[#B59024] font-bold">
-              Step-by-Step Topic Map
+              Step-by-Step Topic Map · {activeSubject.code}
             </div>
             <h2 className="text-xl font-bold text-slate-900 mt-0.5">
-              Your C Programming Learning Path
+              Your {activeSubject.name} Learning Path
             </h2>
           </div>
 
@@ -492,22 +498,10 @@ export const DashboardPage: React.FC = () => {
             <div className="absolute left-10 right-10 top-1/2 -translate-y-5 h-1 bg-slate-200 z-0" />
             <div
               className="absolute left-10 top-1/2 -translate-y-5 h-1 bg-[#D4AF37] z-0 transition-all duration-500"
-              style={{ width: '54%' }}
+              style={{ width: `${Math.min(90, Math.max(20, overallMastery))}%` }}
             />
 
-            {conceptStates
-              .filter((c) =>
-                [
-                  'variables',
-                  'operators',
-                  'conditions',
-                  'loops',
-                  'functions',
-                  'pointers',
-                  'structures',
-                ].includes(c.id)
-              )
-              .map((node) => {
+            {conceptStates.slice(0, 7).map((node) => {
                 const isMastered = node.rawClassification === 'Mastered' || node.mastery >= 70;
                 const isRecommended = node.id === recommendedNextStep.id;
                 const isLocked = node.status === 'Locked' || node.isRestrictedByPrerequisite;
@@ -654,130 +648,153 @@ export const DashboardPage: React.FC = () => {
         {/* RIGHT COLUMN: Quick Practice Card (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
           <div className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <span className="text-xs text-[#B59024] font-bold">
-                  Quick Practice
-                </span>
-                <div className="text-base text-slate-900 font-bold mt-0.5">
-                  {currentQuestion.conceptName}: {currentQuestion.topic}
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-md bg-[#FBF7E8] text-[#B59024] font-mono text-xs font-bold">
-                {currentQuestion.difficulty}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="tabular-nums">
-                Question {(quizIndex % dashboardQuestions.length) + 1} of {dashboardQuestions.length}
-              </span>
-              <button
-                type="button"
-                onClick={() => setRoute('adaptive-quiz')}
-                className="text-[#B59024] hover:underline font-bold"
-              >
-                Open Quiz with Hints →
-              </button>
-            </div>
-
-            {/* Question Prompt & Code Snippet */}
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
-              <p className="text-sm text-slate-900 font-medium leading-relaxed">
-                {currentQuestion.question}
-              </p>
-              {currentQuestion.codeSnippet && (
-                <pre className="p-3 rounded-lg bg-slate-900 text-xs font-mono text-[#D4AF37] overflow-x-auto leading-relaxed">
-                  <code>{currentQuestion.codeSnippet}</code>
-                </pre>
-              )}
-            </div>
-
-            {/* Radio Options */}
-            <div className="space-y-2">
-              {currentQuestion.options.map((opt, idx) => {
-                const isSelected = selectedOption === idx;
-                return (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => {
-                      setSelectedOption(idx);
-                      setSubmittedFeedback(null);
-                    }}
-                    className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all border ${
-                      isSelected
-                        ? 'bg-[#FBF7E8] border-[#D4AF37]'
-                        : 'bg-white border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div
-                      className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                        isSelected
-                          ? 'bg-[#D4AF37] text-slate-950'
-                          : 'bg-slate-100 text-transparent'
-                      }`}
-                    >
-                      <span className="w-2 h-2 rounded-full bg-current" />
+            {currentQuestion ? (
+              <>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div>
+                    <span className="text-xs text-[#B59024] font-bold">
+                      Quick Practice · {activeSubject.code}
+                    </span>
+                    <div className="text-base text-slate-900 font-bold mt-0.5">
+                      {currentQuestion.conceptName}: {currentQuestion.topic}
                     </div>
-                    <span className="text-xs text-slate-900 font-mono leading-snug">{opt}</span>
-                  </button>
-                );
-              })}
-            </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md bg-[#FBF7E8] text-[#B59024] font-mono text-xs font-bold">
+                    {currentQuestion.difficulty}
+                  </span>
+                </div>
 
-            {submittedFeedback && (
-              <div
-                className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
-                  submittedFeedback.isCorrect
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-amber-50 border-amber-300 text-amber-950'
-                }`}
-              >
-                <div className="font-bold flex items-center justify-between">
-                  <span>
-                    {submittedFeedback.isCorrect
-                      ? '✓ Correct! Your mastery score was updated.'
-                      : '✕ Not quite. Here is why:'}
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="tabular-nums">
+                    Question {(quizIndex % dashboardQuestions.length) + 1} of {dashboardQuestions.length}
                   </span>
                   <button
                     type="button"
-                    onClick={handleNextDashboardQuestion}
-                    className="underline font-bold text-[#B59024]"
+                    onClick={() => setRoute('adaptive-quiz')}
+                    className="text-[#B59024] hover:underline font-bold"
                   >
-                    Next Question →
+                    Open Quiz with Hints →
                   </button>
                 </div>
-                <p className="leading-relaxed text-slate-700">{submittedFeedback.explanation}</p>
+
+                {/* Question Prompt & Code Snippet */}
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <p className="text-sm text-slate-900 font-medium leading-relaxed">
+                    {currentQuestion.question}
+                  </p>
+                  {currentQuestion.codeSnippet && (
+                    <pre className="p-3 rounded-lg bg-slate-900 text-xs font-mono text-[#D4AF37] overflow-x-auto leading-relaxed">
+                      <code>{currentQuestion.codeSnippet}</code>
+                    </pre>
+                  )}
+                </div>
+
+                {/* Radio Options */}
+                <div className="space-y-2">
+                  {currentQuestion.options.map((opt, idx) => {
+                    const isSelected = selectedOption === idx;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          setSelectedOption(idx);
+                          setSubmittedFeedback(null);
+                        }}
+                        className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all border ${
+                          isSelected
+                            ? 'bg-[#FBF7E8] border-[#D4AF37]'
+                            : 'bg-white border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                            isSelected
+                              ? 'bg-[#D4AF37] text-slate-950'
+                              : 'bg-slate-100 text-transparent'
+                          }`}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-current" />
+                        </div>
+                        <span className="text-xs text-slate-900 font-mono leading-snug">{opt}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {submittedFeedback && (
+                  <div
+                    className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                      submittedFeedback.isCorrect
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                        : 'bg-amber-50 border-amber-300 text-amber-950'
+                    }`}
+                  >
+                    <div className="font-bold flex items-center justify-between">
+                      <span>
+                        {submittedFeedback.isCorrect
+                          ? '✓ Correct! Your mastery score was updated.'
+                          : '✕ Not quite. Here is why:'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleNextDashboardQuestion}
+                        className="underline font-bold text-[#B59024]"
+                      >
+                        Next Question →
+                      </button>
+                    </div>
+                    <p className="leading-relaxed text-slate-700">{submittedFeedback.explanation}</p>
+                  </div>
+                )}
+
+                {/* Quiz Footer */}
+                <div className="pt-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {dashboardQuestions.slice(0, 5).map((q, i) => (
+                      <span
+                        key={q.id}
+                        className={`w-2 h-2 rounded-full ${
+                          i === quizIndex % 5
+                            ? 'bg-[#D4AF37]'
+                            : i < quizIndex % 5
+                            ? 'bg-slate-400'
+                            : 'bg-slate-200'
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleQuizSubmit}
+                    className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d] transition-all flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <span>Check Answer</span>
+                    <CheckCircle2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="py-8 text-center space-y-3">
+                <div className="text-xs font-bold text-[#B59024] uppercase tracking-wider">
+                  Quick Practice · {activeSubject.name}
+                </div>
+                <div className="text-sm font-bold text-slate-900">
+                  Diagnostic content for this subject is being prepared.
+                </div>
+                <p className="text-xs text-slate-600 max-w-xs mx-auto">
+                  No diagnostic questions are currently available for {activeSubject.name}. You can study the interactive topic lessons directly.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleSelectConcept(recommendedNextStep.id, 'learning-content')}
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d]"
+                >
+                  Open {recommendedNextStep.shortName} Lesson →
+                </button>
               </div>
             )}
-
-            {/* Quiz Footer */}
-            <div className="pt-2 flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                {dashboardQuestions.slice(0, 5).map((q, i) => (
-                  <span
-                    key={q.id}
-                    className={`w-2 h-2 rounded-full ${
-                      i === quizIndex % 5
-                        ? 'bg-[#D4AF37]'
-                        : i < quizIndex % 5
-                        ? 'bg-slate-400'
-                        : 'bg-slate-200'
-                    }`}
-                  />
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleQuizSubmit}
-                className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d] transition-all flex items-center gap-1.5 whitespace-nowrap"
-              >
-                <span>Check Answer</span>
-                <CheckCircle2 className="w-4 h-4" />
-              </button>
-            </div>
           </div>
         </div>
       </section>
@@ -799,7 +816,7 @@ export const DashboardPage: React.FC = () => {
                 </span>
               </div>
               <div className="text-xs text-slate-500">
-                Ask for simple explanations, C code examples, or hints
+                Ask for simple explanations, {activeSubject.name} examples, or step-by-step hints
               </div>
             </div>
           </div>
@@ -845,27 +862,27 @@ export const DashboardPage: React.FC = () => {
             {
               label: 'Explain Simply',
               action: 'explain_simply',
-              prompt: `Explain ${recommendedNextStep.shortName} in simple terms for a ${student.level} student.`,
+              prompt: `Explain ${recommendedNextStep.shortName} in ${activeSubject.name} in simple terms for a ${student.level} student.`,
             },
             {
               label: 'Give Example',
               action: 'give_example',
-              prompt: `Show me a clear C code example for ${recommendedNextStep.shortName}.`,
+              prompt: `Show me a clear ${activeSubject.name} example for ${recommendedNextStep.shortName}.`,
             },
             {
               label: 'Give Me a Hint',
               action: 'give_hint',
-              prompt: `Give me a conceptual hint on ${recommendedNextStep.shortName} without revealing the final answer.`,
+              prompt: `Give me a conceptual hint on ${recommendedNextStep.shortName} in ${activeSubject.name} without revealing the final answer.`,
             },
             {
               label: 'Explain My Mistake',
               action: 'explain_mistake',
-              prompt: `Explain why pass-by-value vs pass-by-reference causes mistakes in ${recommendedNextStep.shortName}.`,
+              prompt: `Explain why ${recommendedNextStep.deficitLabel} causes mistakes in ${recommendedNextStep.shortName} (${activeSubject.name}).`,
             },
             {
-              label: 'What is recursion?',
-              action: 'explain_simply',
-              prompt: 'What is recursion and how do base cases work in C?',
+              label: `Key Rules of ${recommendedNextStep.shortName}`,
+              action: 'summarize',
+              prompt: `What are the most important rules and exam pitfalls for ${recommendedNextStep.shortName} in ${activeSubject.name}?`,
             },
           ].map((btn) => (
             <button
@@ -927,8 +944,8 @@ export const DashboardPage: React.FC = () => {
                       {msg.rapidCheck.selectedIndex !== undefined && (
                         <div className="text-xs text-slate-700 pt-1 font-medium">
                           {msg.rapidCheck.selectedIndex === msg.rapidCheck.correctIndex
-                            ? '✓ Correct! Because C passes by value, x in main() stays 8 unless you assign x = triple(x);'
-                            : 'Not quite — C passes arguments by value, so x in main() stays 8 unless reassigned.'}
+                            ? `✓ Correct! Great mastery of ${recommendedNextStep.shortName} in ${activeSubject.name}.`
+                            : `Not quite — review the core rule for ${recommendedNextStep.shortName} in ${activeSubject.name}.`}
                         </div>
                       )}
                     </div>

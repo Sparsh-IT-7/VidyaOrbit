@@ -339,33 +339,37 @@ interface TeacherCohortModalProps {
 }
 
 export const TeacherCohortModal: React.FC<TeacherCohortModalProps> = ({ isOpen, onClose }) => {
-  const { student, overallMastery, applyDemoPreset } = useLearning();
+  const { student, activeSubject, conceptStates, overallMastery, applyDemoPreset } = useLearning();
 
   if (!isOpen) return null;
+
+  const weakNode = conceptStates[3] || conceptStates[0];
+  const blockedNode = conceptStates[4] || conceptStates[1] || weakNode;
+  const finalNode = conceptStates[conceptStates.length - 1] || weakNode;
 
   const cohortStudents = [
     {
       name: student.name + ' (Current)',
       overall: `${overallMastery}%`,
-      weakConcept: 'Functions (52%)',
-      blockedConcept: 'Pointers (31%)',
-      recommendedAction: 'Revise Functions → Unlock Pointers',
+      weakConcept: `${weakNode?.shortName || 'Core Topic'} (${weakNode?.mastery ?? 52}%)`,
+      blockedConcept: `${blockedNode?.shortName || 'Advanced Topic'} (${blockedNode?.mastery ?? 31}%)`,
+      recommendedAction: `Revise ${weakNode?.shortName || 'Core Topic'} → Unlock ${blockedNode?.shortName || 'Advanced Topic'}`,
       preset: 'default_gap' as const,
     },
     {
       name: 'Maya Lin',
       overall: '74%',
-      weakConcept: 'Pointers (44%)',
-      blockedConcept: 'Structures (35%)',
-      recommendedAction: 'Functions Developing (72%) · Pointers Active',
+      weakConcept: `${blockedNode?.shortName || 'Advanced Topic'} (44%)`,
+      blockedConcept: `${finalNode?.shortName || 'Capstone Topic'} (35%)`,
+      recommendedAction: `${weakNode?.shortName || 'Core Topic'} Developing (72%) · ${blockedNode?.shortName || 'Advanced Topic'} Active`,
       preset: 'functions_unlocked' as const,
     },
     {
       name: 'Rohan Verma',
       overall: '85%',
-      weakConcept: 'Structures (66%)',
+      weakConcept: `${finalNode?.shortName || 'Capstone Topic'} (66%)`,
       blockedConcept: 'None (All Unlocked)',
-      recommendedAction: 'Capstone Structures Practice',
+      recommendedAction: `Capstone ${finalNode?.shortName || 'Topic'} Practice`,
       preset: 'high_mastery' as const,
     },
   ];
@@ -380,10 +384,10 @@ export const TeacherCohortModal: React.FC<TeacherCohortModalProps> = ({ isOpen, 
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Class Overview (Teacher Preview)
+                Class Overview — {activeSubject.name} (Teacher Preview)
               </h2>
               <p className="text-xs text-slate-500">
-                Compare how VidyaOrbit adapts learning paths for different student profiles
+                Compare how VidyaOrbit adapts {activeSubject.name} learning paths for different student profiles
               </p>
             </div>
           </div>
@@ -401,10 +405,10 @@ export const TeacherCohortModal: React.FC<TeacherCohortModalProps> = ({ isOpen, 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
               <div className="text-xs text-slate-500">Common Bottleneck</div>
               <div className="text-base font-bold text-[#B59024] mt-1">
-                Functions → Pointers
+                {weakNode?.shortName || 'Core Topic'} → {blockedNode?.shortName || 'Advanced Topic'}
               </div>
               <div className="text-[11px] text-slate-600 mt-0.5">
-                64% of students revise Functions before unlocking Pointers
+                64% of students revise {weakNode?.shortName || 'Core Topic'} before unlocking {blockedNode?.shortName || 'Advanced Topic'}
               </div>
             </div>
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">

@@ -1,13 +1,4 @@
-export type ConceptId =
-  | 'variables'
-  | 'datatypes'
-  | 'operators'
-  | 'conditions'
-  | 'loops'
-  | 'functions'
-  | 'arrays'
-  | 'pointers'
-  | 'structures';
+export type ConceptId = string;
 
 export type MasteryStatus =
   | 'Mastered'
@@ -50,15 +41,21 @@ export interface ThresholdConfig {
 
 export interface QuestionMetadata {
   id: string;
+  subjectId?: string;
+  unitId?: string;
+  topicId?: string;
   topic: string;
   conceptId: ConceptId;
   conceptName: string;
   difficulty: Difficulty;
   question: string;
   codeSnippet?: string;
+  codeFilename?: string;
+  codeLanguage?: string;
   options: string[];
   correctAnswerIndex: number;
   explanation: string;
+  mistakeType?: string;
   prerequisiteConceptId?: ConceptId;
   hints: {
     hint1: string; // Conceptual clue
@@ -70,11 +67,21 @@ export interface QuestionMetadata {
 export interface AttemptRecord {
   id: string;
   studentId: string;
+  subjectId?: string;
+  topicId?: string;
   questionId: string;
   conceptId: ConceptId;
   conceptName: string;
   selectedOptionIndex: number;
   correctOptionIndex: number;
+  topic?: string;
+  questionText?: string;
+  studentAnswer?: string;
+  correctAnswer?: string;
+  studentAnswerText?: string;
+  correctAnswerText?: string;
+  explanation?: string;
+  mistakeType?: string;
   isCorrect: boolean;
   difficulty: Difficulty;
   timeTakenSeconds: number;
@@ -84,6 +91,7 @@ export interface AttemptRecord {
 
 export interface ConceptNodeDefinition {
   id: ConceptId;
+  subjectId?: string;
   name: string;
   shortName: string;
   order: number;
@@ -96,6 +104,7 @@ export interface ConceptNodeDefinition {
 
 export interface ConceptMasteryState {
   id: ConceptId;
+  subjectId?: string;
   name: string;
   shortName: string;
   order: number;

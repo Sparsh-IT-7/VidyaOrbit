@@ -22,13 +22,13 @@ export interface StoredStudentUser {
 
 export interface AuthTokenRecord {
   tokenHash: string;
-  rawTokenPreview?: string; // Stored only in dev outbox memory for preview testing
   userId: string;
   email: string;
   type: 'verify_email' | 'reset_password';
   createdAt: number;
   expiresAt: number;
   usedAt?: number;
+  failedAttempts: number;
 }
 
 export interface DispatchedEmailPreview {
@@ -37,23 +37,22 @@ export interface DispatchedEmailPreview {
   from: string;
   subject: string;
   type: 'verify_email' | 'reset_password';
-  actionUrl: string;
-  token: string;
-  html: string;
   sentAt: string;
   deliveryMode: 'smtp' | 'fallback_outbox';
 }
 
 // --- Configuration Constants ---
 
-const VERIFICATION_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes validity for 6-digit OTP
+const RESET_OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes validity for password reset OTP
+const RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds cooldown between OTP resends
+const MAX_OTP_ATTEMPTS = 5; // Maximum wrong OTP attempts before invalidation
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DATA_FILE_PATH = path.resolve(process.cwd(), '.vidyaorbit-auth-store.json');
 
 // Rate limiting window (per IP + endpoint)
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const MAX_AUTH_REQUESTS_PER_MINUTE = 20;
+const MAX_AUTH_REQUESTS_PER_MINUTE = 25;
 
 // --- Cryptographic Helpers ---
 
@@ -82,14 +81,28 @@ export function verifyPassword(password: string, storedHash: string, storedSalt:
   }
 }
 
-export function generateSecureToken(): { rawToken: string; tokenHash: string } {
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  return { rawToken, tokenHash };
+export function generateSecureSixDigitOtp(): { rawOtp: string; tokenHash: string } {
+  // Secure random 6-digit integer between 100000 and 999999 inclusive
+  const otpNumber = crypto.randomInt(100000, 1000000);
+  const rawOtp = otpNumber.toString();
+  const tokenHash = hashRawToken(rawOtp);
+  return { rawOtp, tokenHash };
 }
 
 export function hashRawToken(rawToken: string): string {
-  return crypto.createHash('sha256').update(rawToken).digest('hex');
+  return crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
+}
+
+export function verifyTokenHashMatch(candidateRaw: string, storedHashHex: string): boolean {
+  try {
+    const candidateHash = hashRawToken(candidateRaw);
+    const bufA = Buffer.from(candidateHash, 'hex');
+    const bufB = Buffer.from(storedHashHex, 'hex');
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
 }
 
 export function signJwtToken(payload: {
@@ -164,6 +177,7 @@ interface PersistedAuthData {
 const revokedTokens = new Set<string>();
 const dispatchedOutbox: DispatchedEmailPreview[] = [];
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+const resendCooldownMap = new Map<string, number>();
 
 function createDefaultUsers(): StoredStudentUser[] {
   const demoCreds = hashPassword('Password123!');
@@ -190,7 +204,13 @@ function loadStore(): PersistedAuthData {
       const raw = fs.readFileSync(DATA_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(raw) as PersistedAuthData;
       if (Array.isArray(parsed.users) && Array.isArray(parsed.tokens)) {
-        return parsed;
+        return {
+          users: parsed.users,
+          tokens: parsed.tokens.map((t) => ({
+            ...t,
+            failedAttempts: typeof t.failedAttempts === 'number' ? t.failedAttempts : 0,
+          })),
+        };
       }
     }
   } catch (err) {
@@ -214,87 +234,115 @@ function saveStore(data: PersistedAuthData): void {
 
 const authStore = loadStore();
 
-// --- SMTP Email Service ---
+// --- Gmail SMTP Email Service ---
 
 function isSmtpConfigured(): boolean {
-  const host = (process.env.SMTP_HOST || '').trim();
+  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
   const user = (process.env.SMTP_USERNAME || '').trim();
   const pass = (process.env.SMTP_PASSWORD || '').trim();
-  return Boolean(host && user && pass);
+  return Boolean(
+    host &&
+      user &&
+      pass &&
+      user !== 'your-email@gmail.com' &&
+      pass !== 'your-gmail-app-password'
+  );
 }
 
-function getAppBaseUrl(req: Request): string {
-  const envUrl = (process.env.APP_URL || '').trim();
-  if (envUrl && envUrl !== 'MY_APP_URL' && envUrl.startsWith('http')) {
-    return envUrl.replace(/\/$/, '');
+function getFormattedFromAddress(): string {
+  const rawFrom = (process.env.SMTP_FROM || process.env.SMTP_USERNAME || 'no-reply@vidyaorbit.edu').trim();
+  if (rawFrom.includes('<') && rawFrom.includes('>')) {
+    return rawFrom.replace(/Vaani(\s+AI)?/gi, 'VidyaOrbit');
   }
-  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
-  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
-  return `${proto}://${host}`;
+  return `VidyaOrbit <${rawFrom}>`;
 }
 
-function buildVerificationEmailHtml(name: string, verifyUrl: string, token: string): string {
-  return `
-    <div style="font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; max-width: 560px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 32px; color: #0f172a;">
-      <div style="margin-bottom: 20px;">
-        <span style="display: inline-block; padding: 4px 10px; border-radius: 6px; background: #fbf7e8; border: 1px solid #d4af37; color: #b59024; font-size: 12px; font-weight: 700;">
-          VidyaOrbit
-        </span>
-      </div>
-      <h2 style="font-size: 22px; font-weight: 700; margin: 0 0 12px; color: #0f172a;">
-        Verify your student email address
-      </h2>
-      <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 24px;">
-        Hello ${name}, welcome to <strong>VidyaOrbit</strong>! Please confirm your email address to activate your student account and access your diagnostic tests, syllabus, and AI Tutor.
-      </p>
-      <div style="margin: 28px 0;">
-        <a href="${verifyUrl}" style="display: inline-block; background: #d4af37; color: #0f172a; font-weight: 700; font-size: 14px; text-decoration: none; padding: 12px 24px; border-radius: 10px;">
-          Verify Email Address
-        </a>
-      </div>
-      <p style="font-size: 12px; line-height: 1.5; color: #64748b; margin: 0 0 8px;">
-        This verification link expires in 30 minutes. If the button above does not open, copy and paste this link:
-      </p>
-      <p style="font-size: 12px; font-family: monospace; word-break: break-all; color: #0f172a; background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
-        ${verifyUrl}
-      </p>
-      <p style="font-size: 11px; color: #94a3b8; margin-top: 24px;">
-        Verification Code: <code style="color: #475569;">${token}</code>
-      </p>
-    </div>
-  `;
+function sanitizeDisplayText(input: string): string {
+  return input.replace(/[<>]/g, '').trim();
 }
 
-function buildPasswordResetEmailHtml(name: string, resetUrl: string, token: string): string {
-  return `
-    <div style="font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; max-width: 560px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 32px; color: #0f172a;">
-      <div style="margin-bottom: 20px;">
-        <span style="display: inline-block; padding: 4px 10px; border-radius: 6px; background: #fbf7e8; border: 1px solid #d4af37; color: #b59024; font-size: 12px; font-weight: 700;">
-          VidyaOrbit
-        </span>
-      </div>
-      <h2 style="font-size: 22px; font-weight: 700; margin: 0 0 12px; color: #0f172a;">
-        Reset your VidyaOrbit password
-      </h2>
-      <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 24px;">
-        Hello ${name}, we received a request to reset your VidyaOrbit student password. Click the button below to create a new password.
-      </p>
-      <div style="margin: 28px 0;">
-        <a href="${resetUrl}" style="display: inline-block; background: #d4af37; color: #0f172a; font-weight: 700; font-size: 14px; text-decoration: none; padding: 12px 24px; border-radius: 10px;">
-          Create New Password
-        </a>
-      </div>
-      <p style="font-size: 12px; line-height: 1.5; color: #64748b; margin: 0 0 8px;">
-        This password reset link is valid for 15 minutes and can only be used once. If you did not request a password reset, you can safely ignore this email.
-      </p>
-      <p style="font-size: 12px; font-family: monospace; word-break: break-all; color: #0f172a; background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
-        ${resetUrl}
-      </p>
-      <p style="font-size: 11px; color: #94a3b8; margin-top: 24px;">
-        Reset Token: <code style="color: #475569;">${token}</code>
-      </p>
+function buildOtpVerificationEmailPlain(userName: string, otpCode: string): string {
+  const safeName = sanitizeDisplayText(userName || 'Student');
+  return `Hello ${safeName},
+
+Thank you for registering with VidyaOrbit.
+
+Use the verification code below to verify your email address and activate your account:
+
+${otpCode}
+
+This code will expire in 5 minutes.
+
+If you did not request this verification code, please ignore this email.
+
+— Team VidyaOrbit`;
+}
+
+function buildOtpVerificationEmailHtml(userName: string, otpCode: string): string {
+  const safeName = sanitizeDisplayText(userName || 'Student');
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;border:1px solid #e2e8f0;border-radius:14px;background:#FFFFFF;color:#0F172A;">
+  <div style="text-align:center;margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid #f1f5f9;">
+    <div style="display:inline-block;padding:4px 12px;border-radius:6px;background:#FBF7E8;border:1px solid #D4AF37;color:#0F172A;font-size:11px;font-weight:800;letter-spacing:1.5px;margin-bottom:8px;">
+      VIDYAORBIT
     </div>
-  `;
+    <h1 style="color:#0F172A;margin:0;font-size:24px;font-weight:800;letter-spacing:0.5px;">VIDYAORBIT</h1>
+    <p style="color:#64748B;font-size:13px;margin:4px 0 0;font-weight:500;">Engineering Learning Platform</p>
+  </div>
+  <p style="color:#0F172A;font-size:15px;line-height:1.6;margin:0 0 12px;">Hello <b>${safeName}</b>,</p>
+  <p style="color:#334155;font-size:14px;line-height:1.6;margin:0 0 24px;">Thank you for registering with VidyaOrbit. Use the verification code below to verify your email address and activate your account:</p>
+  <div style="text-align:center;margin:28px 0;">
+    <div style="display:inline-block;background:#FBF7E8;padding:18px 32px;border-radius:12px;border:2px dashed #D4AF37;">
+      <div style="letter-spacing:10px;font-size:32px;font-weight:800;color:#0F172A;font-family:monospace;">${otpCode}</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#B59024;margin-top:6px;">Verification Code</div>
+    </div>
+  </div>
+  <p style="color:#475569;font-size:13px;line-height:1.6;margin:0 0 10px;text-align:center;">This code expires in <b>5 minutes</b>.</p>
+  <p style="color:#64748B;font-size:12px;line-height:1.5;margin:0;text-align:center;">If you did not request this verification code, please ignore this email.</p>
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0 16px;" />
+  <p style="color:#94A3B8;font-size:12px;text-align:center;margin:0;font-weight:600;">&copy; VidyaOrbit</p>
+</div>`;
+}
+
+function buildPasswordResetOtpEmailPlain(userName: string, otpCode: string): string {
+  const safeName = sanitizeDisplayText(userName || 'Student');
+  return `Hello ${safeName},
+
+We received a request to reset your VidyaOrbit student password.
+
+Use the verification code below to reset your password:
+
+${otpCode}
+
+This code will expire in 5 minutes.
+
+If you did not request a password reset, please ignore this email.
+
+— Team VidyaOrbit`;
+}
+
+function buildPasswordResetOtpEmailHtml(userName: string, otpCode: string): string {
+  const safeName = sanitizeDisplayText(userName || 'Student');
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;border:1px solid #e2e8f0;border-radius:14px;background:#FFFFFF;color:#0F172A;">
+  <div style="text-align:center;margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid #f1f5f9;">
+    <div style="display:inline-block;padding:4px 12px;border-radius:6px;background:#FBF7E8;border:1px solid #D4AF37;color:#0F172A;font-size:11px;font-weight:800;letter-spacing:1.5px;margin-bottom:8px;">
+      VIDYAORBIT
+    </div>
+    <h1 style="color:#0F172A;margin:0;font-size:24px;font-weight:800;letter-spacing:0.5px;">VIDYAORBIT</h1>
+    <p style="color:#64748B;font-size:13px;margin:4px 0 0;font-weight:500;">Engineering Learning Platform</p>
+  </div>
+  <p style="color:#0F172A;font-size:15px;line-height:1.6;margin:0 0 12px;">Hello <b>${safeName}</b>,</p>
+  <p style="color:#334155;font-size:14px;line-height:1.6;margin:0 0 24px;">We received a request to reset your VidyaOrbit password. Enter the 6-digit password reset code below to set a new password:</p>
+  <div style="text-align:center;margin:28px 0;">
+    <div style="display:inline-block;background:#FBF7E8;padding:18px 32px;border-radius:12px;border:2px dashed #D4AF37;">
+      <div style="letter-spacing:10px;font-size:32px;font-weight:800;color:#0F172A;font-family:monospace;">${otpCode}</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#B59024;margin-top:6px;">Password Reset Code</div>
+    </div>
+  </div>
+  <p style="color:#475569;font-size:13px;line-height:1.6;margin:0 0 10px;text-align:center;">This code expires in <b>5 minutes</b>.</p>
+  <p style="color:#64748B;font-size:12px;line-height:1.5;margin:0;text-align:center;">If you did not request a password reset, please ignore this email.</p>
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0 16px;" />
+  <p style="color:#94A3B8;font-size:12px;text-align:center;margin:0;font-weight:600;">&copy; VidyaOrbit</p>
+</div>`;
 }
 
 async function sendSmtpEmail(options: {
@@ -303,12 +351,9 @@ async function sendSmtpEmail(options: {
   html: string;
   text: string;
   type: 'verify_email' | 'reset_password';
-  actionUrl: string;
-  token: string;
 }): Promise<{ delivered: boolean; mode: 'smtp' | 'fallback_outbox'; error?: string }> {
-  const fromAddress = (process.env.SMTP_FROM || 'VidyaOrbit <no-reply@vidyaorbit.edu>').trim();
+  const fromAddress = getFormattedFromAddress();
 
-  // Always record in local outbox for developer inspection/testing convenience
   const recordOutbox = (mode: 'smtp' | 'fallback_outbox') => {
     dispatchedOutbox.unshift({
       id: 'mail_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -316,9 +361,6 @@ async function sendSmtpEmail(options: {
       from: fromAddress,
       subject: options.subject,
       type: options.type,
-      actionUrl: options.actionUrl,
-      token: options.token,
-      html: options.html,
       sentAt: new Date().toISOString(),
       deliveryMode: mode,
     });
@@ -327,50 +369,54 @@ async function sendSmtpEmail(options: {
     }
   };
 
-  if (isSmtpConfigured()) {
-    try {
-      const host = process.env.SMTP_HOST!.trim();
-      const port = Number(process.env.SMTP_PORT || '587');
-      const secure = port === 465;
-
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure,
-        auth: {
-          user: process.env.SMTP_USERNAME!.trim(),
-          pass: process.env.SMTP_PASSWORD!.trim(),
-        },
-        connectionTimeout: 8000,
-        greetingTimeout: 8000,
-      });
-
-      await transporter.sendMail({
-        from: fromAddress,
-        to: options.to,
-        subject: options.subject,
-        text: options.text,
-        html: options.html,
-      });
-
-      recordOutbox('smtp');
-      return { delivered: true, mode: 'smtp' };
-    } catch (err: any) {
-      console.error('SMTP email dispatch error:', err?.message || err);
-      return {
-        delivered: false,
-        mode: 'smtp',
-        error: err?.message || 'SMTP server could not send email.',
-      };
-    }
+  if (!isSmtpConfigured()) {
+    return {
+      delivered: false,
+      mode: 'smtp',
+      error: 'Unable to send verification email. Please try again.',
+    };
   }
 
-  // Fallback outbox mode when SMTP env vars are not yet configured in environment
-  recordOutbox('fallback_outbox');
-  console.log(
-    `[VidyaOrbit SMTP Outbox] (${options.type}) To: ${options.to} | Action Link: ${options.actionUrl}`
-  );
-  return { delivered: true, mode: 'fallback_outbox' };
+  try {
+    const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+    const port = Number(process.env.SMTP_PORT || '465');
+    const secure = port === 465;
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: {
+        user: process.env.SMTP_USERNAME!.trim(),
+        pass: process.env.SMTP_PASSWORD!.trim(),
+      },
+      tls: {
+        rejectUnauthorized: true,
+        minVersion: 'TLSv1.2',
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 15000,
+    });
+
+    await transporter.sendMail({
+      from: fromAddress,
+      to: options.to,
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+    });
+
+    recordOutbox('smtp');
+    return { delivered: true, mode: 'smtp' };
+  } catch (err: any) {
+    console.error('Gmail SMTP email dispatch error:', err?.message || err);
+    return {
+      delivered: false,
+      mode: 'smtp',
+      error: 'Unable to send verification email. Please try again.',
+    };
+  }
 }
 
 // --- Validation Helpers ---
@@ -385,6 +431,21 @@ function validatePasswordStrength(password: string): string | null {
     return 'Password must be at least 8 characters long.';
   }
   return null;
+}
+
+function checkResendCooldown(email: string): number {
+  const key = email.trim().toLowerCase();
+  const now = Date.now();
+  const nextAllowedAt = resendCooldownMap.get(key) || 0;
+  if (now < nextAllowedAt) {
+    return Math.ceil((nextAllowedAt - now) / 1000);
+  }
+  return 0;
+}
+
+function setResendCooldown(email: string): void {
+  const key = email.trim().toLowerCase();
+  resendCooldownMap.set(key, Date.now() + RESEND_COOLDOWN_MS);
 }
 
 // --- Rate Limiting Middleware ---
@@ -403,7 +464,7 @@ function rateLimitAuth(req: Request, res: Response, next: NextFunction) {
   bucket.count += 1;
   if (bucket.count > MAX_AUTH_REQUESTS_PER_MINUTE) {
     return res.status(429).json({
-      error: 'Too many attempts. Please wait a minute and try again.',
+      error: 'Too many requests. Please wait a moment and try again.',
     });
   }
 
@@ -447,7 +508,7 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
         confirmPassword?: string;
       };
 
-      const cleanName = (name || '').trim();
+      const cleanName = sanitizeDisplayText(name || '');
       const cleanEmail = (email || '').trim().toLowerCase();
 
       if (!cleanName || cleanName.length < 2) {
@@ -468,73 +529,84 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
       }
 
       const existingUser = authStore.users.find((u) => u.email.toLowerCase() === cleanEmail);
-      if (existingUser) {
+      if (existingUser && existingUser.emailVerified) {
         return res.status(409).json({
           error: 'An account with this email already exists. Please log in or reset your password.',
         });
       }
 
+      const now = Date.now();
       const { hash, salt } = hashPassword(password!);
-      const newUser: StoredStudentUser = {
-        id: 'usr_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex'),
-        name: cleanName,
-        email: cleanEmail,
-        passwordHash: hash,
-        passwordSalt: salt,
-        role: 'VidyaOrbit Learner',
-        status: 'active',
-        emailVerified: false,
-        streakDays: 1,
-        createdAt: Date.now(),
-      };
 
-      // Generate short-lived verification token
-      const { rawToken, tokenHash } = generateSecureToken();
+      let targetUser: StoredStudentUser;
+      if (existingUser && !existingUser.emailVerified) {
+        // Update unverified student account details & issue a fresh OTP
+        existingUser.name = cleanName;
+        existingUser.passwordHash = hash;
+        existingUser.passwordSalt = salt;
+        targetUser = existingUser;
+
+        // Invalidate previous OTPs for this user
+        authStore.tokens.forEach((t) => {
+          if (t.userId === targetUser.id && t.type === 'verify_email' && !t.usedAt) {
+            t.usedAt = now;
+          }
+        });
+      } else {
+        targetUser = {
+          id: 'usr_' + now + '_' + crypto.randomBytes(3).toString('hex'),
+          name: cleanName,
+          email: cleanEmail,
+          passwordHash: hash,
+          passwordSalt: salt,
+          role: 'VidyaOrbit Learner',
+          status: 'active',
+          emailVerified: false,
+          streakDays: 1,
+          createdAt: now,
+        };
+        authStore.users.push(targetUser);
+      }
+
+      // Generate secure 6-digit OTP
+      const { rawOtp, tokenHash } = generateSecureSixDigitOtp();
       const tokenRecord: AuthTokenRecord = {
         tokenHash,
-        rawTokenPreview: rawToken,
-        userId: newUser.id,
-        email: newUser.email,
+        userId: targetUser.id,
+        email: targetUser.email,
         type: 'verify_email',
-        createdAt: Date.now(),
-        expiresAt: Date.now() + VERIFICATION_TOKEN_TTL_MS,
+        createdAt: now,
+        expiresAt: now + OTP_TTL_MS,
+        failedAttempts: 0,
       };
 
-      authStore.users.push(newUser);
       authStore.tokens.push(tokenRecord);
       saveStore(authStore);
 
-      const baseUrl = getAppBaseUrl(req);
-      const verifyUrl = `${baseUrl}/?route=verify-email&token=${rawToken}`;
-
       const emailResult = await sendSmtpEmail({
-        to: newUser.email,
-        subject: 'Verify your VidyaOrbit Student Account',
-        html: buildVerificationEmailHtml(newUser.name, verifyUrl, rawToken),
-        text: `Welcome to VidyaOrbit, ${newUser.name}! Verify your account by visiting: ${verifyUrl}`,
+        to: targetUser.email,
+        subject: `Your VidyaOrbit Verification Passcode: ${rawOtp}`,
+        html: buildOtpVerificationEmailHtml(targetUser.name, rawOtp),
+        text: buildOtpVerificationEmailPlain(targetUser.name, rawOtp),
         type: 'verify_email',
-        actionUrl: verifyUrl,
-        token: rawToken,
       });
 
       if (!emailResult.delivered) {
         return res.status(502).json({
-          error: 'Your verification email could not be sent. Please try again.',
-          email: newUser.email,
+          error: 'Unable to send verification email. Please try again.',
+          email: targetUser.email,
           requiresVerification: true,
         });
       }
 
+      setResendCooldown(targetUser.email);
+
       return res.status(201).json({
-        message: 'Account created. Please check your email to verify your account.',
-        email: newUser.email,
+        message: 'We sent a 6-digit verification code to your email. Your verification code expires in 5 minutes.',
+        email: targetUser.email,
         requiresVerification: true,
         deliveryMode: emailResult.mode,
-        // Provided only when SMTP is not configured in local/preview environment so user can test verification flow seamlessly
-        previewVerificationToken:
-          emailResult.mode === 'fallback_outbox' ? rawToken : undefined,
-        previewVerificationUrl:
-          emailResult.mode === 'fallback_outbox' ? verifyUrl : undefined,
+        expiresInSeconds: 300,
       });
     } catch (error) {
       console.error('Error in POST /api/auth/register:', error);
@@ -571,7 +643,7 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
 
       if (!user.emailVerified) {
         return res.status(403).json({
-          error: 'Please verify your email before logging in.',
+          error: 'Please verify your email with your 6-digit verification code before logging in.',
           code: 'EMAIL_NOT_VERIFIED',
           email: user.email,
         });
@@ -604,84 +676,177 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
     }
   });
 
-  // 3. POST /api/auth/verify-email
-  app.post('/api/auth/verify-email', rateLimitAuth, (req: Request, res: Response) => {
+  // 3. POST /api/auth/verify-otp (and /api/auth/verify-email alias)
+  const handleVerifyOtp = (req: Request, res: Response) => {
     try {
-      const { token } = req.body as { token?: string };
-      const cleanToken = (token || '').trim();
+      const { email, otp, token } = req.body as {
+        email?: string;
+        otp?: string;
+        token?: string;
+      };
 
-      if (!cleanToken) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      const rawCode = (otp || token || '').trim().replace(/\s+/g, '');
+
+      if (!rawCode || !/^\d{6}$/.test(rawCode)) {
         return res.status(400).json({
-          error: 'Verification token is missing.',
-          code: 'INVALID_TOKEN',
+          error: 'Incorrect verification code. Please enter the 6-digit code sent to your email.',
+          code: 'INVALID_OTP',
         });
       }
 
-      const tokenHash = hashRawToken(cleanToken);
-      const tokenRecord = authStore.tokens.find(
-        (t) => t.tokenHash === tokenHash && t.type === 'verify_email'
-      );
+      // 1. Verify student exists
+      const user = cleanEmail
+        ? authStore.users.find((u) => u.email.toLowerCase() === cleanEmail)
+        : authStore.users.find((u) =>
+            authStore.tokens.some(
+              (t) =>
+                t.userId === u.id &&
+                t.type === 'verify_email' &&
+                !t.usedAt &&
+                verifyTokenHashMatch(rawCode, t.tokenHash)
+            )
+          );
 
-      if (!tokenRecord) {
-        return res.status(400).json({
-          error: 'This verification link is invalid. Please check your link or request a new one.',
-          code: 'INVALID_TOKEN',
-        });
-      }
-
-      const user = authStore.users.find((u) => u.id === tokenRecord.userId);
       if (!user) {
         return res.status(400).json({
-          error: 'Student account associated with this link was not found.',
-          code: 'INVALID_TOKEN',
+          error: 'Incorrect verification code. Please try again.',
+          code: 'INVALID_OTP',
         });
       }
 
-      if (user.emailVerified && tokenRecord.usedAt) {
+      if (user.emailVerified) {
+        const sessionJwt = signJwtToken({
+          sub: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        });
         return res.status(200).json({
-          message: 'Your email has been verified successfully.',
+          message: 'Email verified successfully.',
           alreadyVerified: true,
+          verified: true,
           email: user.email,
+          token: sessionJwt,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            streakDays: user.streakDays,
+            emailVerified: true,
+          },
         });
       }
 
-      if (tokenRecord.usedAt) {
+      // 2. Find latest active OTP record belonging to this student
+      const userOtpRecords = authStore.tokens
+        .filter((t) => t.userId === user.id && t.type === 'verify_email')
+        .sort((a, b) => b.createdAt - a.createdAt);
+
+      const latestRecord = userOtpRecords[0];
+      if (!latestRecord) {
         return res.status(400).json({
-          error: 'This verification link has already been used.',
-          code: 'USED_TOKEN',
+          error: 'No active verification code found. Please request a new code.',
+          code: 'NO_OTP',
           email: user.email,
         });
       }
 
-      if (Date.now() > tokenRecord.expiresAt) {
+      // 3. Check if already used
+      if (latestRecord.usedAt) {
         return res.status(400).json({
-          error: 'This verification link has expired. Request a new one.',
-          code: 'EXPIRED_TOKEN',
+          error: 'Your verification code has expired or already been used. Please request a new code.',
+          code: 'USED_OTP',
           email: user.email,
         });
       }
 
-      // Mark token used and user verified
-      tokenRecord.usedAt = Date.now();
+      // 4. Check if expired (5 minutes)
+      if (Date.now() > latestRecord.expiresAt) {
+        latestRecord.usedAt = Date.now();
+        saveStore(authStore);
+        return res.status(400).json({
+          error: 'Your verification code has expired. Please request a new code.',
+          code: 'EXPIRED_OTP',
+          email: user.email,
+        });
+      }
+
+      // 5. Check if too many incorrect attempts
+      if (latestRecord.failedAttempts >= MAX_OTP_ATTEMPTS) {
+        latestRecord.usedAt = Date.now();
+        saveStore(authStore);
+        return res.status(429).json({
+          error: 'Too many incorrect attempts. Please request a new verification code.',
+          code: 'TOO_MANY_ATTEMPTS',
+          email: user.email,
+        });
+      }
+
+      // 6. Verify OTP hash matches
+      const matches = verifyTokenHashMatch(rawCode, latestRecord.tokenHash);
+      if (!matches) {
+        latestRecord.failedAttempts += 1;
+        const remaining = MAX_OTP_ATTEMPTS - latestRecord.failedAttempts;
+        if (remaining <= 0) {
+          latestRecord.usedAt = Date.now();
+          saveStore(authStore);
+          return res.status(429).json({
+            error: 'Too many incorrect attempts. Your code has been locked. Please request a new code.',
+            code: 'TOO_MANY_ATTEMPTS',
+            email: user.email,
+          });
+        }
+        saveStore(authStore);
+        return res.status(400).json({
+          error: 'Incorrect verification code. Please try again.',
+          code: 'INVALID_OTP',
+          email: user.email,
+        });
+      }
+
+      // Success: mark email verified, invalidate OTP, activate account
+      latestRecord.usedAt = Date.now();
       user.emailVerified = true;
       user.verifiedAt = Date.now();
+      user.status = 'active';
       saveStore(authStore);
 
+      const sessionJwt = signJwtToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      });
+
       return res.status(200).json({
-        message: 'Your email has been verified successfully.',
+        message: 'Email verified successfully.',
         verified: true,
         email: user.email,
+        token: sessionJwt,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          streakDays: user.streakDays,
+          emailVerified: true,
+        },
       });
     } catch (error) {
-      console.error('Error in POST /api/auth/verify-email:', error);
+      console.error('Error in POST /api/auth/verify-otp:', error);
       return res.status(500).json({
-        error: 'Could not verify your email right now. Please try again.',
+        error: 'Could not verify your code right now. Please try again.',
       });
     }
-  });
+  };
 
-  // 4. POST /api/auth/resend-verification
-  app.post('/api/auth/resend-verification', rateLimitAuth, async (req: Request, res: Response) => {
+  app.post('/api/auth/verify-otp', rateLimitAuth, handleVerifyOtp);
+  app.post('/api/auth/verify-email', rateLimitAuth, handleVerifyOtp);
+
+  // 4. POST /api/auth/resend-otp (and /api/auth/resend-verification alias)
+  const handleResendOtp = async (req: Request, res: Response) => {
     try {
       const { email } = req.body as { email?: string };
       const cleanEmail = (email || '').trim().toLowerCase();
@@ -690,11 +855,20 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
         return res.status(400).json({ error: 'Please enter a valid email address.' });
       }
 
+      const cooldownSeconds = checkResendCooldown(cleanEmail);
+      if (cooldownSeconds > 0) {
+        return res.status(429).json({
+          error: `You can request another code in ${cooldownSeconds} seconds.`,
+          retryAfterSeconds: cooldownSeconds,
+        });
+      }
+
       const user = authStore.users.find((u) => u.email.toLowerCase() === cleanEmail);
       if (!user) {
-        // Avoid exposing account existence
+        setResendCooldown(cleanEmail);
         return res.status(200).json({
-          message: 'If an unverified account exists for this email, a new verification link has been sent.',
+          message: 'If an unverified account exists for this email, a new 6-digit verification code has been sent.',
+          retryAfterSeconds: 30,
         });
       }
 
@@ -705,7 +879,7 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
         });
       }
 
-      // Invalidate any previous unused verification tokens for this user
+      // Invalidate any previous unused OTPs for this user
       const now = Date.now();
       authStore.tokens.forEach((t) => {
         if (t.userId === user.id && t.type === 'verify_email' && !t.usedAt) {
@@ -713,52 +887,51 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
         }
       });
 
-      const { rawToken, tokenHash } = generateSecureToken();
+      // Generate new 6-digit OTP & reset 5-minute expiration
+      const { rawOtp, tokenHash } = generateSecureSixDigitOtp();
       authStore.tokens.push({
         tokenHash,
-        rawTokenPreview: rawToken,
         userId: user.id,
         email: user.email,
         type: 'verify_email',
         createdAt: now,
-        expiresAt: now + VERIFICATION_TOKEN_TTL_MS,
+        expiresAt: now + OTP_TTL_MS,
+        failedAttempts: 0,
       });
       saveStore(authStore);
 
-      const baseUrl = getAppBaseUrl(req);
-      const verifyUrl = `${baseUrl}/?route=verify-email&token=${rawToken}`;
-
       const emailResult = await sendSmtpEmail({
         to: user.email,
-        subject: 'Verify your VidyaOrbit Student Account',
-        html: buildVerificationEmailHtml(user.name, verifyUrl, rawToken),
-        text: `Hello ${user.name}, verify your VidyaOrbit account here: ${verifyUrl}`,
+        subject: `Your VidyaOrbit Verification Passcode: ${rawOtp}`,
+        html: buildOtpVerificationEmailHtml(user.name, rawOtp),
+        text: buildOtpVerificationEmailPlain(user.name, rawOtp),
         type: 'verify_email',
-        actionUrl: verifyUrl,
-        token: rawToken,
       });
 
       if (!emailResult.delivered) {
         return res.status(502).json({
-          error: 'Your verification email could not be sent. Please try again.',
+          error: 'Unable to send verification email. Please try again.',
         });
       }
 
+      setResendCooldown(cleanEmail);
+
       return res.status(200).json({
-        message: 'A new verification email has been sent. Please check your inbox.',
+        message: 'A new 6-digit verification code has been sent to your email. It expires in 5 minutes.',
         deliveryMode: emailResult.mode,
-        previewVerificationToken:
-          emailResult.mode === 'fallback_outbox' ? rawToken : undefined,
-        previewVerificationUrl:
-          emailResult.mode === 'fallback_outbox' ? verifyUrl : undefined,
+        retryAfterSeconds: 30,
+        expiresInSeconds: 300,
       });
     } catch (error) {
-      console.error('Error in POST /api/auth/resend-verification:', error);
+      console.error('Error in POST /api/auth/resend-otp:', error);
       return res.status(500).json({
-        error: 'Your verification email could not be sent. Please try again.',
+        error: 'Unable to send verification email. Please try again.',
       });
     }
-  });
+  };
+
+  app.post('/api/auth/resend-otp', rateLimitAuth, handleResendOtp);
+  app.post('/api/auth/resend-verification', rateLimitAuth, handleResendOtp);
 
   // 5. POST /api/auth/forgot-password
   app.post('/api/auth/forgot-password', rateLimitAuth, async (req: Request, res: Response) => {
@@ -771,17 +944,25 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
       }
 
       const genericSuccessMessage =
-        'If an account exists for this email, a password reset link has been sent.';
+        'If an account exists for this email, a password reset message has been sent.';
+
+      const cooldownSeconds = checkResendCooldown(`reset:${cleanEmail}`);
+      if (cooldownSeconds > 0) {
+        return res.status(429).json({
+          error: `You can request another code in ${cooldownSeconds} seconds.`,
+          retryAfterSeconds: cooldownSeconds,
+        });
+      }
 
       const user = authStore.users.find((u) => u.email.toLowerCase() === cleanEmail);
       if (!user) {
-        // Return identical message to prevent email enumeration
+        setResendCooldown(`reset:${cleanEmail}`);
         return res.status(200).json({
           message: genericSuccessMessage,
         });
       }
 
-      // Invalidate older unused password reset tokens for this user
+      // Invalidate older unused password reset OTPs for this user
       const now = Date.now();
       authStore.tokens.forEach((t) => {
         if (t.userId === user.id && t.type === 'reset_password' && !t.usedAt) {
@@ -789,42 +970,37 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
         }
       });
 
-      const { rawToken, tokenHash } = generateSecureToken();
+      const { rawOtp, tokenHash } = generateSecureSixDigitOtp();
       authStore.tokens.push({
         tokenHash,
-        rawTokenPreview: rawToken,
         userId: user.id,
         email: user.email,
         type: 'reset_password',
         createdAt: now,
-        expiresAt: now + RESET_TOKEN_TTL_MS,
+        expiresAt: now + RESET_OTP_TTL_MS,
+        failedAttempts: 0,
       });
       saveStore(authStore);
 
-      const baseUrl = getAppBaseUrl(req);
-      const resetUrl = `${baseUrl}/?route=reset-password&token=${rawToken}`;
-
       const emailResult = await sendSmtpEmail({
         to: user.email,
-        subject: 'Reset your VidyaOrbit Password',
-        html: buildPasswordResetEmailHtml(user.name, resetUrl, rawToken),
-        text: `Hello ${user.name}, reset your VidyaOrbit password by visiting: ${resetUrl}`,
+        subject: `Your VidyaOrbit Password Reset Code: ${rawOtp}`,
+        html: buildPasswordResetOtpEmailHtml(user.name, rawOtp),
+        text: buildPasswordResetOtpEmailPlain(user.name, rawOtp),
         type: 'reset_password',
-        actionUrl: resetUrl,
-        token: rawToken,
       });
 
       if (!emailResult.delivered) {
         return res.status(502).json({
-          error: 'Password reset email could not be sent right now. Please try again.',
+          error: 'Unable to send password reset email. Please try again.',
         });
       }
+
+      setResendCooldown(`reset:${cleanEmail}`);
 
       return res.status(200).json({
         message: genericSuccessMessage,
         deliveryMode: emailResult.mode,
-        previewResetToken: emailResult.mode === 'fallback_outbox' ? rawToken : undefined,
-        previewResetUrl: emailResult.mode === 'fallback_outbox' ? resetUrl : undefined,
       });
     } catch (error) {
       console.error('Error in POST /api/auth/forgot-password:', error);
@@ -837,16 +1013,20 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
   // 6. POST /api/auth/reset-password
   app.post('/api/auth/reset-password', rateLimitAuth, (req: Request, res: Response) => {
     try {
-      const { token, newPassword, confirmNewPassword } = req.body as {
+      const { email, token, otp, newPassword, confirmNewPassword } = req.body as {
+        email?: string;
         token?: string;
+        otp?: string;
         newPassword?: string;
         confirmNewPassword?: string;
       };
 
-      const cleanToken = (token || '').trim();
-      if (!cleanToken) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      const cleanCode = (otp || token || '').trim().replace(/\s+/g, '');
+
+      if (!cleanCode) {
         return res.status(400).json({
-          error: 'Password reset token is missing.',
+          error: 'Please enter the 6-digit password reset code sent to your email.',
           code: 'INVALID_TOKEN',
         });
       }
@@ -860,46 +1040,70 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
         return res.status(400).json({ error: 'Passwords do not match.' });
       }
 
-      const tokenHash = hashRawToken(cleanToken);
-      const tokenRecord = authStore.tokens.find(
-        (t) => t.tokenHash === tokenHash && t.type === 'reset_password'
-      );
+      const candidateRecords = authStore.tokens
+        .filter(
+          (t) =>
+            t.type === 'reset_password' &&
+            (!cleanEmail || t.email.toLowerCase() === cleanEmail)
+        )
+        .sort((a, b) => b.createdAt - a.createdAt);
 
-      if (!tokenRecord) {
+      const latestRecord = candidateRecords[0];
+      if (!latestRecord) {
         return res.status(400).json({
-          error: 'This password reset link is invalid. Please request a new one.',
+          error: 'Incorrect or expired reset code. Please request a new code.',
           code: 'INVALID_TOKEN',
         });
       }
 
-      if (tokenRecord.usedAt) {
+      if (latestRecord.usedAt) {
         return res.status(400).json({
-          error: 'This password reset link has already been used. Please request a new one.',
+          error: 'This reset code has already been used. Please request a new code.',
           code: 'USED_TOKEN',
         });
       }
 
-      if (Date.now() > tokenRecord.expiresAt) {
+      if (Date.now() > latestRecord.expiresAt) {
+        latestRecord.usedAt = Date.now();
+        saveStore(authStore);
         return res.status(400).json({
-          error: 'This password reset link has expired. Request a new one.',
+          error: 'Your reset code has expired. Please request a new code.',
           code: 'EXPIRED_TOKEN',
         });
       }
 
-      const user = authStore.users.find((u) => u.id === tokenRecord.userId);
-      if (!user) {
+      if (latestRecord.failedAttempts >= MAX_OTP_ATTEMPTS) {
+        latestRecord.usedAt = Date.now();
+        saveStore(authStore);
+        return res.status(429).json({
+          error: 'Too many incorrect attempts. Please request a new password reset code.',
+          code: 'TOO_MANY_ATTEMPTS',
+        });
+      }
+
+      if (!verifyTokenHashMatch(cleanCode, latestRecord.tokenHash)) {
+        latestRecord.failedAttempts += 1;
+        saveStore(authStore);
         return res.status(400).json({
-          error: 'Account associated with this reset token was not found.',
+          error: 'Incorrect password reset code. Please try again.',
           code: 'INVALID_TOKEN',
         });
       }
 
-      // Hash new password and invalidate token
+      const user = authStore.users.find((u) => u.id === latestRecord.userId);
+      if (!user) {
+        return res.status(400).json({
+          error: 'Student account was not found.',
+          code: 'INVALID_TOKEN',
+        });
+      }
+
+      // Hash new password and invalidate reset OTP
       const { hash, salt } = hashPassword(newPassword!);
       user.passwordHash = hash;
       user.passwordSalt = salt;
-      user.emailVerified = true; // Completing email reset also confirms email ownership
-      tokenRecord.usedAt = Date.now();
+      user.emailVerified = true;
+      latestRecord.usedAt = Date.now();
       saveStore(authStore);
 
       return res.status(200).json({
@@ -940,25 +1144,13 @@ export function registerSmtpAuthRoutes(app: express.Application): void {
     });
   });
 
-  // 9. GET /api/auth/smtp-status (Returns non-sensitive SMTP readiness status + dev outbox for testing)
-  app.get('/api/auth/smtp-status', (req: Request, res: Response) => {
-    const emailFilter = ((req.query.email as string) || '').trim().toLowerCase();
-    const filteredEmails = emailFilter
-      ? dispatchedOutbox.filter((m) => m.to.toLowerCase() === emailFilter)
-      : dispatchedOutbox.slice(0, 5);
-
+  // 9. GET /api/auth/smtp-status (Non-sensitive status endpoint)
+  app.get('/api/auth/smtp-status', (_req: Request, res: Response) => {
     return res.status(200).json({
       smtpConfigured: isSmtpConfigured(),
-      recentEmails: filteredEmails.map((m) => ({
-        id: m.id,
-        to: m.to,
-        subject: m.subject,
-        type: m.type,
-        actionUrl: m.actionUrl,
-        token: m.token,
-        sentAt: m.sentAt,
-        deliveryMode: m.deliveryMode,
-      })),
+      host: 'smtp.gmail.com',
+      port: 465,
+      ssl: true,
     });
   });
 }

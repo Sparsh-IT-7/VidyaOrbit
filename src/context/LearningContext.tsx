@@ -4,18 +4,14 @@ import {
   AttemptRecord,
   ChatMessage,
   ConceptId,
+  ConceptLessonData,
   ConceptMasteryState,
   Difficulty,
   LearningPathItem,
+  QuestionMetadata,
   StudentProfile,
   ThresholdConfig,
 } from '../types/learning';
-import {
-  C_CONCEPT_DEFINITIONS,
-  INITIAL_ATTEMPT_COUNTS,
-  INITIAL_BASELINE_SCORES,
-  INITIAL_PREVIOUS_SCORES,
-} from '../data/curriculumData';
 import {
   DEFAULT_THRESHOLDS,
   evaluateKnowledgeGraph,
@@ -27,6 +23,11 @@ import {
   SyllabusUnit,
   subjectManagementService,
 } from '../services/SubjectManagement';
+import {
+  getQuestionsForSubject,
+  resolveConceptLesson,
+  resolveSubjectCurriculum,
+} from '../data/subjectRegistry';
 
 export interface AuthActionResponse {
   ok: boolean;
@@ -38,6 +39,8 @@ export interface AuthActionResponse {
   deliveryMode?: 'smtp' | 'fallback_outbox';
   previewToken?: string;
   previewUrl?: string;
+  retryAfterSeconds?: number;
+  expiresInSeconds?: number;
 }
 
 interface LearningContextValue {
@@ -63,7 +66,7 @@ interface LearningContextValue {
     email: string;
     password: string;
   }) => Promise<AuthActionResponse>;
-  verifyStudentEmail: (token: string) => Promise<AuthActionResponse>;
+  verifyStudentEmail: (otpCode: string, emailOverride?: string) => Promise<AuthActionResponse>;
   resendVerificationEmail: (email: string) => Promise<AuthActionResponse>;
   requestPasswordReset: (email: string) => Promise<AuthActionResponse>;
   confirmPasswordReset: (payload: {
@@ -78,6 +81,7 @@ interface LearningContextValue {
   // Subject Management Service State
   subjects: EngineeringSubject[];
   activeSubject: EngineeringSubject;
+  activeSubjectId: string;
   selectEngineeringSubject: (subjectId: string) => void;
   addEngineeringSubject: (input: CreateSubjectInput) => EngineeringSubject;
   addSyllabusUnitToSubject: (subjectId: string, unit: SyllabusUnit) => void;
@@ -91,6 +95,8 @@ interface LearningContextValue {
   previousScores: Record<ConceptId, number>;
   attemptCountsBase: Record<ConceptId, number>;
   attempts: AttemptRecord[];
+  subjectQuestions: QuestionMetadata[];
+  getLessonForConcept: (conceptId: ConceptId) => ConceptLessonData;
   recordAttempt: (attempt: Omit<AttemptRecord, 'id' | 'studentId' | 'timestamp'>) => void;
   boostConceptMastery: (conceptId: ConceptId, newScore: number) => void;
   applyDemoPreset: (preset: 'default_gap' | 'functions_unlocked' | 'high_mastery') => void;
@@ -101,7 +107,7 @@ interface LearningContextValue {
   learningPath: LearningPathItem[];
   recommendedNextStep: ConceptMasteryState;
   activeConceptId: ConceptId;
-  setActiveConceptId: (id: ConceptId) => void;
+  setActiveConceptId: (id: ConceptId, subjectIdOverride?: string) => void;
 
   // Adaptive Quiz State
   adaptiveDifficulty: Difficulty;
@@ -326,19 +332,35 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [subjects, setSubjects] = useState<EngineeringSubject[]>(() =>
     subjectManagementService.getAllSubjects()
   );
-  const [activeSubjectId, setActiveSubjectId] = useState<string>('subj_cs101');
+  const [activeSubjectId, setActiveSubjectId] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem('vidyaorbit_active_subject_id_v1') || 'subj_cs101';
+    } catch {
+      return 'subj_cs101';
+    }
+  });
   const [thresholds, setThresholds] = useState<ThresholdConfig>(DEFAULT_THRESHOLDS);
 
-  const [baselineScores, setBaselineScores] = useState<Record<ConceptId, number>>(INITIAL_BASELINE_SCORES);
-  const [previousScores, setPreviousScores] = useState<Record<ConceptId, number>>(INITIAL_PREVIOUS_SCORES);
-  const [attemptCountsBase, setAttemptCountsBase] = useState<Record<ConceptId, number>>(INITIAL_ATTEMPT_COUNTS);
-  const [attempts, setAttempts] = useState<AttemptRecord[]>(INITIAL_ATTEMPTS);
+  // Per-subject state maps so each subject maintains its own isolated mastery, attempts, and chat
+  const [subjectBaselinesMap, setSubjectBaselinesMap] = useState<
+    Record<string, Record<ConceptId, number>>
+  >({});
+  const [subjectPreviousMap, setSubjectPreviousMap] = useState<
+    Record<string, Record<ConceptId, number>>
+  >({});
+  const [subjectAttemptCountsMap, setSubjectAttemptCountsMap] = useState<
+    Record<string, Record<ConceptId, number>>
+  >({});
+  const [subjectAttemptsMap, setSubjectAttemptsMap] = useState<Record<string, AttemptRecord[]>>({});
+  const [subjectActiveConceptMap, setSubjectActiveConceptMap] = useState<Record<string, ConceptId>>(
+    {}
+  );
+  const [subjectChatsMap, setSubjectChatsMap] = useState<Record<string, ChatMessage[]>>({
+    subj_cs101: INITIAL_CHAT,
+  });
 
-  const [activeConceptId, setActiveConceptId] = useState<ConceptId>('functions');
   const [adaptiveDifficulty, setAdaptiveDifficulty] = useState<Difficulty>('Medium');
   const [recentQuizWindow, setRecentQuizWindow] = useState<boolean[]>([true, true]);
-
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_CHAT);
   const [isAiTyping, setIsAiTyping] = useState<boolean>(false);
 
   // Route setter with route protection for authenticated views
@@ -501,12 +523,20 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const verifyStudentEmail = async (token: string): Promise<AuthActionResponse> => {
+  const verifyStudentEmail = async (
+    otpCode: string,
+    emailOverride?: string
+  ): Promise<AuthActionResponse> => {
     try {
-      const res = await fetch('/api/auth/verify-email', {
+      const targetEmail = (emailOverride || authEmailContext || '').trim().toLowerCase();
+      const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({
+          email: targetEmail,
+          otp: otpCode.trim(),
+          token: otpCode.trim(),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -515,13 +545,22 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         return {
           ok: false,
-          error: data.error || 'This verification link is invalid or has expired.',
+          error: data.error || 'Incorrect verification code. Please try again.',
           code: data.code,
           email: data.email,
         };
       }
       if (data.email) {
         setAuthEmailContext(data.email);
+      }
+      if (data.token && data.user) {
+        persistSession(data.token, {
+          id: data.user.id,
+          name: data.user.name,
+          email: data.user.email,
+          role: data.user.role || 'VidyaOrbit Learner',
+          streakDays: data.user.streakDays ?? 1,
+        });
       }
       // Clean URL query params if present
       try {
@@ -533,7 +572,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       return {
         ok: true,
-        message: data.message || 'Your email has been verified successfully.',
+        message: data.message || 'Email verified successfully.',
         alreadyVerified: data.alreadyVerified,
         email: data.email,
       };
@@ -547,33 +586,31 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const resendVerificationEmail = async (email: string): Promise<AuthActionResponse> => {
     try {
-      const res = await fetch('/api/auth/resend-verification', {
+      const res = await fetch('/api/auth/resend-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
       const data = await res.json();
       if (!res.ok) {
         return {
           ok: false,
-          error: data.error || 'Your verification email could not be sent. Please try again.',
+          error: data.error || 'Unable to send verification email. Please try again.',
+          retryAfterSeconds: data.retryAfterSeconds,
         };
-      }
-      if (data.previewVerificationToken) {
-        setAuthTokenParam(data.previewVerificationToken);
       }
       return {
         ok: true,
-        message: data.message || 'Verification email sent. Please check your inbox.',
+        message: data.message || 'A new 6-digit verification code has been sent to your email.',
         alreadyVerified: data.alreadyVerified,
         deliveryMode: data.deliveryMode,
-        previewToken: data.previewVerificationToken,
-        previewUrl: data.previewVerificationUrl,
+        retryAfterSeconds: data.retryAfterSeconds ?? 30,
+        expiresInSeconds: data.expiresInSeconds ?? 300,
       };
     } catch {
       return {
         ok: false,
-        error: 'Your verification email could not be sent. Please try again.',
+        error: 'Unable to send verification email. Please try again.',
       };
     }
   };
@@ -622,13 +659,17 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          otp: payload.token,
+          email: authEmailContext,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
         return {
           ok: false,
-          error: data.error || 'Could not reset password. Please request a new reset link.',
+          error: data.error || 'Incorrect or expired reset code. Please request a new code.',
           code: data.code,
         };
       }
@@ -705,24 +746,73 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   }, [subjects, activeSubjectId]);
 
+  const currentCurriculum = useMemo(() => {
+    return resolveSubjectCurriculum(activeSubject);
+  }, [activeSubject]);
+
+  const baselineScores = useMemo(() => {
+    return {
+      ...currentCurriculum.baselineScores,
+      ...(subjectBaselinesMap[activeSubject.id] || {}),
+    };
+  }, [currentCurriculum, subjectBaselinesMap, activeSubject.id]);
+
+  const previousScores = useMemo(() => {
+    return {
+      ...currentCurriculum.previousScores,
+      ...(subjectPreviousMap[activeSubject.id] || {}),
+    };
+  }, [currentCurriculum, subjectPreviousMap, activeSubject.id]);
+
+  const attemptCountsBase = useMemo(() => {
+    return {
+      ...currentCurriculum.attemptCounts,
+      ...(subjectAttemptCountsMap[activeSubject.id] || {}),
+    };
+  }, [currentCurriculum, subjectAttemptCountsMap, activeSubject.id]);
+
+  const attempts = useMemo(() => {
+    return subjectAttemptsMap[activeSubject.id] ?? currentCurriculum.initialAttempts;
+  }, [subjectAttemptsMap, activeSubject.id, currentCurriculum]);
+
+  const subjectQuestions = useMemo(() => {
+    return getQuestionsForSubject(activeSubject.id);
+  }, [activeSubject.id]);
+
   const selectEngineeringSubject = (subjectId: string) => {
-    const found = subjectManagementService.getSubjectById(subjectId);
+    const found =
+      subjects.find((s) => s.id === subjectId) || subjectManagementService.getSubjectById(subjectId);
     if (found) {
       setActiveSubjectId(found.id);
+      try {
+        sessionStorage.setItem('vidyaorbit_active_subject_id_v1', found.id);
+      } catch {
+        // ignore
+      }
+      const bundle = resolveSubjectCurriculum(found);
       setStudent((prev) => ({
         ...prev,
         subject: `${found.name} (${found.code})`,
+        selectedTopics: bundle.concepts.map((c) => c.id),
       }));
     }
   };
 
   const addEngineeringSubject = (input: CreateSubjectInput): EngineeringSubject => {
     const created = subjectManagementService.addSubject(input);
-    setSubjects(subjectManagementService.getAllSubjects());
+    const all = subjectManagementService.getAllSubjects();
+    setSubjects(all);
     setActiveSubjectId(created.id);
+    try {
+      sessionStorage.setItem('vidyaorbit_active_subject_id_v1', created.id);
+    } catch {
+      // ignore
+    }
+    const bundle = resolveSubjectCurriculum(created);
     setStudent((prev) => ({
       ...prev,
       subject: `${created.name} (${created.code})`,
+      selectedTopics: bundle.concepts.map((c) => c.id),
     }));
     return created;
   };
@@ -751,7 +841,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setActiveSubjectId('subj_cs101');
     setStudent((prev) => ({
       ...prev,
-      subject: 'C Programming',
+      subject: 'C Programming (CS101)',
     }));
   };
 
@@ -759,132 +849,225 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setThresholds((prev) => ({ ...prev, ...patch }));
   };
 
-  // Compute deterministic concept states
+  // Compute deterministic concept states for the active subject
   const conceptStates = useMemo(() => {
     return evaluateKnowledgeGraph(
-      C_CONCEPT_DEFINITIONS,
+      currentCurriculum.concepts,
       baselineScores,
       previousScores,
       attemptCountsBase,
       attempts,
       thresholds
     );
-  }, [baselineScores, previousScores, attemptCountsBase, attempts, thresholds]);
+  }, [
+    currentCurriculum.concepts,
+    baselineScores,
+    previousScores,
+    attemptCountsBase,
+    attempts,
+    thresholds,
+  ]);
 
-  // Overall mastery percentage (weighted average across core concepts)
+  // Overall mastery percentage (weighted average across active subject concepts)
   const overallMastery = useMemo(() => {
     if (conceptStates.length === 0) return 68;
     const sum = conceptStates.reduce((acc, c) => acc + c.mastery, 0);
     return Math.round(sum / conceptStates.length);
   }, [conceptStates]);
 
-  // Personalized Learning Path
+  // Personalized Learning Path for the active subject
   const learningPath = useMemo(() => {
     return generatePersonalizedLearningPath(conceptStates, student.level, thresholds);
   }, [conceptStates, student.level, thresholds]);
 
-  // Primary recommended next concept (first non-mastered, non-locked concept)
+  // Primary recommended next concept (first non-mastered, non-locked concept in the active subject)
   const recommendedNextStep = useMemo(() => {
     const candidate = conceptStates.find(
       (c) => c.rawClassification !== 'Mastered' && !c.isRestrictedByPrerequisite
     );
-    return candidate || conceptStates.find((c) => c.id === 'functions') || conceptStates[0];
+    return candidate || conceptStates[0];
   }, [conceptStates]);
+
+  const activeConceptId = useMemo(() => {
+    const saved = subjectActiveConceptMap[activeSubject.id];
+    if (saved && conceptStates.some((c) => c.id === saved)) {
+      return saved;
+    }
+    return recommendedNextStep?.id || conceptStates[0]?.id || 'variables';
+  }, [subjectActiveConceptMap, activeSubject.id, conceptStates, recommendedNextStep]);
+
+  const setActiveConceptId = (id: ConceptId, subjectIdOverride?: string) => {
+    const targetSubjectId = subjectIdOverride || activeSubject.id;
+    setSubjectActiveConceptMap((prev) => ({
+      ...prev,
+      [targetSubjectId]: id,
+    }));
+  };
+
+  const getLessonForConcept = (conceptId: ConceptId): ConceptLessonData => {
+    const conceptDef =
+      currentCurriculum.concepts.find((c) => c.id === conceptId) ||
+      currentCurriculum.concepts[0];
+    return resolveConceptLesson(activeSubject, conceptDef);
+  };
+
+  const chatMessages = useMemo<ChatMessage[]>(() => {
+    const existing = subjectChatsMap[activeSubject.id];
+    if (existing && existing.length > 0) {
+      return existing;
+    }
+    const focus = recommendedNextStep || conceptStates[0];
+    const lockedNode = conceptStates.find((c) => c.isRestrictedByPrerequisite);
+    const qSample =
+      subjectQuestions.find((q) => q.conceptId === focus?.id) || subjectQuestions[0];
+
+    const welcomeMsg: ChatMessage = {
+      id: `msg_init_${activeSubject.id}_1`,
+      sender: 'ai',
+      text: `Hello ${student.name}! You are currently studying **${activeSubject.name} (${activeSubject.code})**. Your **${focus?.shortName}** mastery improved from **${focus?.previousMastery}% → ${focus?.mastery}%**${
+        lockedNode
+          ? `, putting you just **${Math.max(0, thresholds.developingMin - (focus?.mastery || 0))}% away** from unlocking **${lockedNode.shortName} (currently ${lockedNode.mastery}%)**`
+          : ''
+      }. Focus area: *${focus?.deficitLabel}*.`,
+      timestamp: 'Just now',
+      actionTag: `${activeSubject.code} Gap Analysis`,
+      ...(qSample
+        ? {
+            rapidCheck: {
+              question: qSample.question,
+              options: qSample.options.slice(0, 3).map((o, i) => `[${String.fromCharCode(65 + i)}] ${o}`),
+              correctIndex: Math.min(2, qSample.correctAnswerIndex),
+            },
+          }
+        : {}),
+    };
+    return [welcomeMsg];
+  }, [
+    subjectChatsMap,
+    activeSubject,
+    recommendedNextStep,
+    conceptStates,
+    subjectQuestions,
+    student.name,
+    thresholds.developingMin,
+  ]);
+
+  const setChatMessagesForActive = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+    setSubjectChatsMap((prev) => {
+      const currentList = prev[activeSubject.id] || chatMessages;
+      return {
+        ...prev,
+        [activeSubject.id]: updater(currentList),
+      };
+    });
+  };
 
   const recordAttempt = (attemptInput: Omit<AttemptRecord, 'id' | 'studentId' | 'timestamp'>) => {
     const newAttempt: AttemptRecord = {
       ...attemptInput,
       id: 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
       studentId: student.id,
+      subjectId: activeSubject.id,
       timestamp: 'Just now',
     };
 
     const currentConcept = conceptStates.find((c) => c.id === attemptInput.conceptId);
     if (currentConcept) {
-      setPreviousScores((prev) => ({
+      setSubjectPreviousMap((prev) => ({
         ...prev,
-        [attemptInput.conceptId]: currentConcept.mastery,
+        [activeSubject.id]: {
+          ...(prev[activeSubject.id] || currentCurriculum.previousScores),
+          [attemptInput.conceptId]: currentConcept.mastery,
+        },
       }));
     }
 
-    setAttempts((prev) => [...prev, newAttempt]);
+    setSubjectAttemptsMap((prev) => {
+      const existing = prev[activeSubject.id] ?? currentCurriculum.initialAttempts;
+      return {
+        ...prev,
+        [activeSubject.id]: [...existing, newAttempt],
+      };
+    });
   };
 
   const boostConceptMastery = (conceptId: ConceptId, newScore: number) => {
     const current = conceptStates.find((c) => c.id === conceptId);
     if (current) {
-      setPreviousScores((prev) => ({ ...prev, [conceptId]: current.mastery }));
+      setSubjectPreviousMap((prev) => ({
+        ...prev,
+        [activeSubject.id]: {
+          ...(prev[activeSubject.id] || currentCurriculum.previousScores),
+          [conceptId]: current.mastery,
+        },
+      }));
     }
-    setBaselineScores((prev) => ({
+    setSubjectBaselinesMap((prev) => ({
       ...prev,
-      [conceptId]: Math.max(0, Math.min(100, newScore)),
+      [activeSubject.id]: {
+        ...(prev[activeSubject.id] || currentCurriculum.baselineScores),
+        [conceptId]: Math.max(0, Math.min(100, newScore)),
+      },
     }));
-    setAttemptCountsBase((prev) => ({
+    setSubjectAttemptCountsMap((prev) => ({
       ...prev,
-      [conceptId]: Math.max(prev[conceptId] || 2, thresholds.minAttemptsForMastery),
+      [activeSubject.id]: {
+        ...(prev[activeSubject.id] || currentCurriculum.attemptCounts),
+        [conceptId]: Math.max(
+          (prev[activeSubject.id]?.[conceptId] ?? currentCurriculum.attemptCounts[conceptId]) || 2,
+          thresholds.minAttemptsForMastery
+        ),
+      },
     }));
   };
 
   const applyDemoPreset = (preset: 'default_gap' | 'functions_unlocked' | 'high_mastery') => {
-    setAttempts([]);
+    const concepts = currentCurriculum.concepts;
     if (preset === 'default_gap') {
-      setBaselineScores(INITIAL_BASELINE_SCORES);
-      setPreviousScores(INITIAL_PREVIOUS_SCORES);
-      setAttemptCountsBase(INITIAL_ATTEMPT_COUNTS);
-      setAttempts(INITIAL_ATTEMPTS);
-      setActiveConceptId('functions');
+      setSubjectBaselinesMap((prev) => ({
+        ...prev,
+        [activeSubject.id]: { ...currentCurriculum.baselineScores },
+      }));
+      setSubjectPreviousMap((prev) => ({
+        ...prev,
+        [activeSubject.id]: { ...currentCurriculum.previousScores },
+      }));
+      setSubjectAttemptCountsMap((prev) => ({
+        ...prev,
+        [activeSubject.id]: { ...currentCurriculum.attemptCounts },
+      }));
+      setSubjectAttemptsMap((prev) => ({
+        ...prev,
+        [activeSubject.id]: [...currentCurriculum.initialAttempts],
+      }));
     } else if (preset === 'functions_unlocked') {
-      setPreviousScores({
-        ...INITIAL_BASELINE_SCORES,
-        functions: 52,
-        pointers: 31,
+      const nextBase: Record<ConceptId, number> = {};
+      const nextPrev: Record<ConceptId, number> = {};
+      const nextCounts: Record<ConceptId, number> = {};
+      concepts.forEach((c, idx) => {
+        const orig = currentCurriculum.baselineScores[c.id] ?? 60;
+        nextPrev[c.id] = orig;
+        nextBase[c.id] = idx < concepts.length - 2 ? Math.max(74, orig) : Math.max(52, orig + 14);
+        nextCounts[c.id] = Math.max(4, currentCurriculum.attemptCounts[c.id] ?? 3);
       });
-      setBaselineScores({
-        ...INITIAL_BASELINE_SCORES,
-        functions: 72,
-        pointers: 44,
-      });
-      setAttemptCountsBase({
-        ...INITIAL_ATTEMPT_COUNTS,
-        functions: 6,
-        pointers: 4,
-      });
-      setActiveConceptId('pointers');
+      setSubjectPreviousMap((prev) => ({ ...prev, [activeSubject.id]: nextPrev }));
+      setSubjectBaselinesMap((prev) => ({ ...prev, [activeSubject.id]: nextBase }));
+      setSubjectAttemptCountsMap((prev) => ({ ...prev, [activeSubject.id]: nextCounts }));
+      setSubjectAttemptsMap((prev) => ({ ...prev, [activeSubject.id]: [] }));
     } else if (preset === 'high_mastery') {
-      setPreviousScores({
-        variables: 91,
-        datatypes: 86,
-        operators: 82,
-        conditions: 76,
-        loops: 73,
-        functions: 72,
-        arrays: 75,
-        pointers: 64,
-        structures: 48,
+      const nextBase: Record<ConceptId, number> = {};
+      const nextPrev: Record<ConceptId, number> = {};
+      const nextCounts: Record<ConceptId, number> = {};
+      concepts.forEach((c, idx) => {
+        const orig = currentCurriculum.baselineScores[c.id] ?? 65;
+        nextPrev[c.id] = Math.max(68, orig);
+        nextBase[c.id] = idx < concepts.length - 1 ? Math.max(85, orig + 12) : 74;
+        nextCounts[c.id] = 6;
       });
-      setBaselineScores({
-        variables: 96,
-        datatypes: 92,
-        operators: 90,
-        conditions: 88,
-        loops: 85,
-        functions: 84,
-        arrays: 82,
-        pointers: 78,
-        structures: 66,
-      });
-      setAttemptCountsBase({
-        variables: 6,
-        datatypes: 5,
-        operators: 5,
-        conditions: 5,
-        loops: 6,
-        functions: 7,
-        arrays: 5,
-        pointers: 6,
-        structures: 4,
-      });
-      setActiveConceptId('pointers');
+      setSubjectPreviousMap((prev) => ({ ...prev, [activeSubject.id]: nextPrev }));
+      setSubjectBaselinesMap((prev) => ({ ...prev, [activeSubject.id]: nextBase }));
+      setSubjectAttemptCountsMap((prev) => ({ ...prev, [activeSubject.id]: nextCounts }));
+      setSubjectAttemptsMap((prev) => ({ ...prev, [activeSubject.id]: [] }));
     }
   };
 
@@ -913,7 +1096,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       timestamp: 'Just now',
     };
 
-    setChatMessages((prev) => [...prev, userMsg]);
+    setChatMessagesForActive((prev) => [...prev, userMsg]);
     setIsAiTyping(true);
 
     try {
@@ -937,7 +1120,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           studentContext: {
             name: student.name,
             level: student.level,
-            subject: student.subject,
+            subject: `${activeSubject.name} (${activeSubject.code})`,
             concept: targetConcept.shortName,
             mastery: targetConcept.mastery,
             status: targetConcept.status,
@@ -957,22 +1140,22 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         timestamp: 'Just now',
         actionTag: actionType ? actionType.replace('_', ' ').toUpperCase() : 'PEDAGOGICAL RESPONSE',
       };
-      setChatMessages((prev) => [...prev, aiMsg]);
+      setChatMessagesForActive((prev) => [...prev, aiMsg]);
     } catch {
       const fallbackMsg: ChatMessage = {
         id: 'msg_ai_' + Date.now(),
         sender: 'ai',
-        text: `Focusing on **${targetConcept.shortName}** (${targetConcept.mastery}% mastery): Remember to trace variable values across stack frames step by step. Would you like a worked example or a progressive hint?`,
+        text: `Focusing on **${targetConcept.shortName}** in **${activeSubject.name}** (${targetConcept.mastery}% mastery): Remember to watch out for *${targetConcept.deficitLabel}* step by step. Would you like a worked example or a progressive hint?`,
         timestamp: 'Just now',
       };
-      setChatMessages((prev) => [...prev, fallbackMsg]);
+      setChatMessagesForActive((prev) => [...prev, fallbackMsg]);
     } finally {
       setIsAiTyping(false);
     }
   };
 
   const answerRapidCheck = (msgId: string, optionIdx: number) => {
-    setChatMessages((prev) =>
+    setChatMessagesForActive((prev) =>
       prev.map((m) =>
         m.id === msgId && m.rapidCheck
           ? { ...m, rapidCheck: { ...m.rapidCheck, selectedIndex: optionIdx } }
@@ -982,11 +1165,11 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const clearChatContext = () => {
-    setChatMessages([
+    setChatMessagesForActive(() => [
       {
         id: 'msg_reset_' + Date.now(),
         sender: 'ai',
-        text: `Context refreshed for **${student.name}** (${student.level} level). Current focus: **${recommendedNextStep.shortName} (${recommendedNextStep.mastery}% mastery)**. How can I help you master this concept?`,
+        text: `Context refreshed for **${student.name}** in **${activeSubject.name} (${activeSubject.code})** (${student.level} level). Current focus: **${recommendedNextStep.shortName} (${recommendedNextStep.mastery}% mastery)**. How can I help you master this concept?`,
         timestamp: 'Just now',
       },
     ]);
@@ -1016,6 +1199,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         logout,
         subjects,
         activeSubject,
+        activeSubjectId,
         selectEngineeringSubject,
         addEngineeringSubject,
         addSyllabusUnitToSubject,
@@ -1027,6 +1211,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         previousScores,
         attemptCountsBase,
         attempts,
+        subjectQuestions,
+        getLessonForConcept,
         recordAttempt,
         boostConceptMastery,
         applyDemoPreset,

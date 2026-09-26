@@ -13,12 +13,11 @@ import {
   Sliders,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
-import { QUESTION_BANK } from '../data/curriculumData';
 
 export const DiagnosticAssessmentPage: React.FC = () => {
-  const { recordAttempt, setRoute, updateStudent } = useLearning();
+  const { activeSubject, subjectQuestions, recordAttempt, setRoute, updateStudent } = useLearning();
 
-  const diagnosticQuestions = QUESTION_BANK.slice(0, 8);
+  const diagnosticQuestions = subjectQuestions.slice(0, 8);
 
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
@@ -28,13 +27,55 @@ export const DiagnosticAssessmentPage: React.FC = () => {
   const [timePerQuestion, setTimePerQuestion] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    setCurrentIndex(0);
+    setSelectedAnswers({});
+    setMarkedForReview({});
+    setElapsedSeconds(0);
+    setQuestionStartTime(Date.now());
+  }, [activeSubject.id]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       setElapsedSeconds((s) => s + 1);
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const currentQ = diagnosticQuestions[currentIndex];
+  if (diagnosticQuestions.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 pb-16">
+        <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center space-y-4 shadow-2xs">
+          <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
+            {activeSubject.name} ({activeSubject.code}) · Diagnostic Assessment
+          </div>
+          <h1 className="text-2xl font-extrabold text-slate-900">
+            No diagnostic questions are currently available for this subject.
+          </h1>
+          <p className="text-sm text-slate-600 max-w-lg mx-auto">
+            Diagnostic content for <strong>{activeSubject.name}</strong> is being prepared. You can explore the syllabus topics and lessons for this subject in the meantime.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setRoute('learning-content')}
+              className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d]"
+            >
+              Open {activeSubject.name} Lessons
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoute('dashboard')}
+              className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200"
+            >
+              Return to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentQ = diagnosticQuestions[currentIndex] || diagnosticQuestions[0];
   const progressPercent = Math.round(((currentIndex + 1) / diagnosticQuestions.length) * 100);
 
   const recordTimeForCurrent = () => {
@@ -104,10 +145,10 @@ export const DiagnosticAssessmentPage: React.FC = () => {
       <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="text-xs font-bold text-[#B59024]">
-            Diagnostic Assessment
+            Diagnostic Assessment · {activeSubject.code}
           </div>
           <h1 className="text-xl md:text-2xl font-bold text-slate-900 mt-0.5">
-            C Programming Skill Check
+            {activeSubject.name} Skill Check
           </h1>
         </div>
 
@@ -214,8 +255,8 @@ export const DiagnosticAssessmentPage: React.FC = () => {
         {currentQ.codeSnippet && (
           <div className="p-4 rounded-xl bg-slate-900">
             <div className="text-[11px] font-mono text-slate-400 pb-2 border-b border-slate-800 mb-3 flex justify-between">
-              <span>main.c</span>
-              <span>C Program</span>
+              <span>{currentQ.codeFilename || `${activeSubject.code} Snippet`}</span>
+              <span>{currentQ.codeLanguage || activeSubject.name}</span>
             </div>
             <pre className="text-xs md:text-sm font-mono text-[#D4AF37] overflow-x-auto leading-relaxed">
               <code>{currentQ.codeSnippet}</code>
@@ -295,6 +336,8 @@ export const DiagnosticAssessmentPage: React.FC = () => {
 
 export const DiagnosticResultPage: React.FC = () => {
   const {
+    activeSubject,
+    subjectQuestions,
     conceptStates,
     overallMastery,
     thresholds,
@@ -323,10 +366,10 @@ export const DiagnosticResultPage: React.FC = () => {
         <div className="space-y-3 max-w-2xl">
           <div className="inline-flex items-center gap-2 text-xs font-bold text-[#B59024]">
             <Sparkles className="w-4 h-4" />
-            <span>Diagnostic Report Complete</span>
+            <span>Diagnostic Report Complete · {activeSubject.code}</span>
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">
-            Your C Programming Knowledge Profile
+            Your {activeSubject.name} Knowledge Profile
           </h1>
           <p className="text-sm text-slate-600 leading-relaxed">
             Instead of just one overall grade, VidyaOrbit checks your mastery on each individual
@@ -358,7 +401,7 @@ export const DiagnosticResultPage: React.FC = () => {
             {overallMastery}%
           </div>
           <div className="text-xs text-slate-500">
-            Across 9 C Programming Topics
+            Across {conceptStates.length} {activeSubject.name} Topics
           </div>
         </div>
       </section>
@@ -547,13 +590,42 @@ export const DiagnosticResultPage: React.FC = () => {
         ) : (
           <div className="space-y-4">
             {incorrectAttempts.map((att) => {
-              const qItem = QUESTION_BANK.find((q) => q.id === att.questionId) || QUESTION_BANK[0];
+              const qItem = subjectQuestions.find((q) => q.id === att.questionId);
               const conceptState = conceptStates.find((c) => c.id === att.conceptId);
               const studentAnswerText =
-                qItem.options[att.selectedOptionIndex] || `Option ${att.selectedOptionIndex + 1}`;
+                att.studentAnswerText ||
+                att.studentAnswer ||
+                qItem?.options[att.selectedOptionIndex] ||
+                `Option ${att.selectedOptionIndex + 1}`;
+              const correctOptionIdx = qItem ? qItem.correctAnswerIndex : att.correctOptionIndex;
               const correctAnswerText =
-                qItem.options[qItem.correctAnswerIndex] || `Option ${qItem.correctAnswerIndex + 1}`;
-              const mistakeType = conceptState?.deficitLabel || 'Conceptual Application Error';
+                att.correctAnswerText ||
+                att.correctAnswer ||
+                qItem?.options[correctOptionIdx] ||
+                `Option ${correctOptionIdx + 1}`;
+              const mistakeType =
+                att.mistakeType ||
+                qItem?.mistakeType ||
+                conceptState?.deficitLabel ||
+                'Conceptual Application Error';
+              const questionTitle =
+                qItem?.question ||
+                att.questionText ||
+                `${att.conceptName} diagnostic question`;
+              const topicLabel = qItem?.topic || att.topic || att.conceptName;
+              const explanationText =
+                qItem?.explanation ||
+                att.explanation ||
+                `Review ${att.conceptName} fundamentals and verify how ${mistakeType.toLowerCase()} affects the result.`;
+              const hint1Text =
+                qItem?.hints.hint1 ||
+                `Identify the core principle governing ${att.conceptName} in ${activeSubject.name}.`;
+              const hint2Text =
+                qItem?.hints.hint2 ||
+                `Trace the state step-by-step while avoiding ${mistakeType.toLowerCase()}.`;
+              const hint3Text =
+                qItem?.hints.hint3 ||
+                `Verify why ${correctAnswerText} satisfies all constraints of ${att.conceptName}.`;
 
               return (
                 <div
@@ -562,9 +634,9 @@ export const DiagnosticResultPage: React.FC = () => {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-bold text-slate-900">{qItem.conceptName}</span>
+                      <span className="font-bold text-slate-900">{att.conceptName}</span>
                       <span aria-hidden="true">·</span>
-                      <span className="text-[#B59024] font-semibold">Topic: {qItem.topic}</span>
+                      <span className="text-[#B59024] font-semibold">Topic: {topicLabel}</span>
                       <span aria-hidden="true">·</span>
                       <span className="text-slate-500">Mistake Type: {mistakeType}</span>
                     </div>
@@ -574,8 +646,8 @@ export const DiagnosticResultPage: React.FC = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-sm font-bold text-slate-900">{qItem.question}</div>
-                    {qItem.codeSnippet && (
+                    <div className="text-sm font-bold text-slate-900">{questionTitle}</div>
+                    {qItem?.codeSnippet && (
                       <pre className="p-3 rounded-xl bg-slate-900 font-mono text-xs text-[#D4AF37] overflow-x-auto">
                         <code>{qItem.codeSnippet}</code>
                       </pre>
@@ -592,28 +664,28 @@ export const DiagnosticResultPage: React.FC = () => {
                     <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-1">
                       <div className="font-bold text-emerald-800">✓ Correct Answer</div>
                       <div className="font-mono text-slate-900 font-semibold">
-                        [{String.fromCharCode(65 + qItem.correctAnswerIndex)}] {correctAnswerText}
+                        [{String.fromCharCode(65 + correctOptionIdx)}] {correctAnswerText}
                       </div>
                     </div>
                   </div>
 
                   <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-2.5 text-xs">
                     <div className="font-bold text-slate-900">
-                      Explanation &amp; Step-by-Step Solution:
+                      Explanation &amp; Step-by-Step Solution ({activeSubject.name}):
                     </div>
-                    <p className="text-slate-700 leading-relaxed">{qItem.explanation}</p>
+                    <p className="text-slate-700 leading-relaxed">{explanationText}</p>
                     <ol className="space-y-1.5 text-slate-600 pt-1 border-t border-slate-100">
                       <li>
                         <strong className="text-[#B59024] font-mono">Step 1:</strong>{' '}
-                        {qItem.hints.hint1}
+                        {hint1Text}
                       </li>
                       <li>
                         <strong className="text-[#B59024] font-mono">Step 2:</strong>{' '}
-                        {qItem.hints.hint2}
+                        {hint2Text}
                       </li>
                       <li>
                         <strong className="text-[#B59024] font-mono">Step 3:</strong>{' '}
-                        {qItem.hints.hint3}
+                        {hint3Text}
                       </li>
                     </ol>
                   </div>
@@ -627,14 +699,14 @@ export const DiagnosticResultPage: React.FC = () => {
                       }}
                       className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:border-[#D4AF37] text-xs font-semibold text-slate-800 transition-colors"
                     >
-                      Review {qItem.conceptName} Lesson
+                      Review {att.conceptName} Lesson
                     </button>
                     <button
                       type="button"
                       onClick={() => {
                         setActiveConceptId(att.conceptId);
                         sendTutorMessage(
-                          `Explain my mistake on "${qItem.question}" where I chose "${studentAnswerText}" instead of "${correctAnswerText}".`,
+                          `Explain my mistake on "${questionTitle}" in ${activeSubject.name} where I chose "${studentAnswerText}" instead of "${correctAnswerText}".`,
                           'explain_mistake',
                           att.conceptId
                         );
@@ -656,16 +728,19 @@ export const DiagnosticResultPage: React.FC = () => {
       <section className="vo-card-hover-subtle p-6 md:p-8 rounded-2xl bg-[#FBF7E8] border border-[#D4AF37] space-y-4">
         <div className="flex items-center gap-2 text-xs font-bold text-[#B59024]">
           <Lock className="w-4 h-4" />
-          <span>Prerequisite Check</span>
+          <span>Prerequisite Check · {activeSubject.name}</span>
         </div>
 
         <h3 className="text-xl font-bold text-slate-900">
-          Prerequisite Gap: Functions is required before Pointers
+          {restrictedConcepts.length > 0
+            ? `Prerequisite Gap: ${restrictedConcepts[0].blockingPrerequisiteName} is required before ${restrictedConcepts[0].shortName}`
+            : `All ${activeSubject.name} Prerequisite Dependencies Satisfied`}
         </h3>
 
         <p className="text-sm text-slate-700 leading-relaxed">
-          “Pointers is currently restricted because Functions is an important prerequisite and your
-          Functions mastery is below the recommended level.”
+          {restrictedConcepts.length > 0
+            ? `“${restrictedConcepts[0].shortName} is currently restricted because ${restrictedConcepts[0].blockingPrerequisiteName} is an important prerequisite in ${activeSubject.name} and its mastery (${restrictedConcepts[0].blockingPrerequisiteMastery}%) is below the recommended threshold.”`
+            : `All prerequisite topics in ${activeSubject.name} meet the required threshold. You can freely advance through all syllabus modules.`}
         </p>
 
         {restrictedConcepts.length > 0 && (
