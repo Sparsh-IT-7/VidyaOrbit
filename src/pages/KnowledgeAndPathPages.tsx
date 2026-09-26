@@ -102,10 +102,10 @@ export const KnowledgeMapPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setActiveConceptId(node.id)}
-                    className={`w-full max-w-xl p-4 rounded-xl border text-left transition-all flex items-center justify-between gap-4 ${
+                    className={`vo-card-hover w-full max-w-xl p-4 rounded-xl border text-left flex items-center justify-between gap-4 ${
                       isSelected
                         ? 'bg-[#FBF7E8] border-[#D4AF37] shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        : 'bg-white border-slate-200'
                     }`}
                   >
                     <div className="flex items-center gap-4">
@@ -174,7 +174,7 @@ export const KnowledgeMapPage: React.FC = () => {
 
         {/* Right Concept Detail Panel (5 cols) */}
         <div className="lg:col-span-5 lg:sticky lg:top-22 space-y-6">
-          <div className="p-6 md:p-7 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-6">
+          <div className="vo-card-hover-subtle p-6 md:p-7 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-6">
             <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-100">
               <div>
                 <div className="text-xs font-bold text-[#B59024]">
@@ -393,7 +393,7 @@ export const PersonalizedLearningPathPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-[#FBF7E8] border border-[#D4AF37] space-y-2 shrink-0">
+        <div className="vo-card-hover p-4 rounded-xl bg-[#FBF7E8] border border-[#D4AF37] space-y-2 shrink-0">
           <div className="text-xs text-[#B59024] font-bold">Recommended Next</div>
           <div className="text-lg font-bold text-slate-900">
             {recommendedNextStep.shortName} ({recommendedNextStep.mastery}%)
@@ -419,7 +419,7 @@ export const PersonalizedLearningPathPage: React.FC = () => {
           return (
             <React.Fragment key={item.id}>
               <div
-                className={`p-5 md:p-6 rounded-2xl border transition-all ${
+                className={`vo-card-hover-subtle p-5 md:p-6 rounded-2xl border ${
                   isRecommended
                     ? 'bg-[#FBF7E8]/60 border-[#D4AF37] shadow-sm'
                     : isCompleted

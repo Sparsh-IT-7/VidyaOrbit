@@ -298,8 +298,10 @@ export const DiagnosticResultPage: React.FC = () => {
     conceptStates,
     overallMastery,
     thresholds,
+    attempts,
     setRoute,
     setActiveConceptId,
+    sendTutorMessage,
   } = useLearning();
 
   const strongAreas = conceptStates.filter(
@@ -308,6 +310,11 @@ export const DiagnosticResultPage: React.FC = () => {
   const weakAreas = conceptStates.filter((c) => c.rawClassification === 'Weak');
   const knowledgeGaps = conceptStates.filter((c) => c.rawClassification === 'Knowledge Gap');
   const restrictedConcepts = conceptStates.filter((c) => c.isRestrictedByPrerequisite);
+
+  const incorrectAttempts = attempts
+    .filter((a) => !a.isCorrect)
+    .slice()
+    .reverse();
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-16">
@@ -345,7 +352,7 @@ export const DiagnosticResultPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-white border border-slate-200 text-center min-w-[210px] space-y-1.5 shadow-2xs">
+        <div className="vo-card-hover p-6 rounded-2xl bg-white border border-slate-200 text-center min-w-[210px] space-y-1.5 shadow-2xs">
           <div className="text-xs font-semibold text-slate-500">Overall Score</div>
           <div className="text-5xl font-extrabold text-[#B59024] font-mono tabular-nums">
             {overallMastery}%
@@ -381,7 +388,7 @@ export const DiagnosticResultPage: React.FC = () => {
                   setActiveConceptId(c.id);
                   setRoute('learning-content');
                 }}
-                className="p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-[#D4AF37] cursor-pointer transition-all space-y-2"
+                className="vo-card-hover p-4 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer space-y-2"
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-900">{c.shortName}</span>
@@ -427,7 +434,7 @@ export const DiagnosticResultPage: React.FC = () => {
       {/* Classification Buckets: Strong Areas, Weak Areas, Knowledge Gaps */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Strong Areas */}
-        <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold text-slate-900">Strong Areas</h3>
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
@@ -451,7 +458,7 @@ export const DiagnosticResultPage: React.FC = () => {
         </div>
 
         {/* Weak Areas */}
-        <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold text-slate-900">Weak Areas</h3>
             <AlertTriangle className="w-5 h-5 text-[#B59024]" />
@@ -484,7 +491,7 @@ export const DiagnosticResultPage: React.FC = () => {
         </div>
 
         {/* Knowledge Gaps */}
-        <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold text-slate-900">Knowledge Gaps</h3>
             <ShieldAlert className="w-5 h-5 text-amber-600" />
@@ -517,8 +524,136 @@ export const DiagnosticResultPage: React.FC = () => {
         </div>
       </section>
 
+      {/* Mistake Identification & Step-by-Step Solution Analysis */}
+      <section className="p-6 md:p-8 rounded-2xl bg-white border border-slate-200 space-y-6 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+          <div>
+            <div className="text-xs font-bold text-[#B59024]">
+              Mistake Identification &amp; Step-by-Step Solutions
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mt-0.5">
+              Detailed Error Analysis ({incorrectAttempts.length} Recorded Mistakes)
+            </h2>
+            <p className="text-xs text-slate-500">
+              Review your selected answer, the correct answer, mistake classification, and a 3-step solution walkthrough.
+            </p>
+          </div>
+        </div>
+
+        {incorrectAttempts.length === 0 ? (
+          <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-600">
+            No incorrect attempts recorded yet. Complete a diagnostic or practice question to view step-by-step mistake analysis.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {incorrectAttempts.map((att) => {
+              const qItem = QUESTION_BANK.find((q) => q.id === att.questionId) || QUESTION_BANK[0];
+              const conceptState = conceptStates.find((c) => c.id === att.conceptId);
+              const studentAnswerText =
+                qItem.options[att.selectedOptionIndex] || `Option ${att.selectedOptionIndex + 1}`;
+              const correctAnswerText =
+                qItem.options[qItem.correctAnswerIndex] || `Option ${qItem.correctAnswerIndex + 1}`;
+              const mistakeType = conceptState?.deficitLabel || 'Conceptual Application Error';
+
+              return (
+                <div
+                  key={att.id}
+                  className="vo-card-hover-subtle p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-bold text-slate-900">{qItem.conceptName}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-[#B59024] font-semibold">Topic: {qItem.topic}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-slate-500">Mistake Type: {mistakeType}</span>
+                    </div>
+                    <span className="font-mono text-xs text-slate-500">
+                      Difficulty: {att.difficulty}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-bold text-slate-900">{qItem.question}</div>
+                    {qItem.codeSnippet && (
+                      <pre className="p-3 rounded-xl bg-slate-900 font-mono text-xs text-[#D4AF37] overflow-x-auto">
+                        <code>{qItem.codeSnippet}</code>
+                      </pre>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                      <div className="font-bold text-red-700">✕ Your Answer</div>
+                      <div className="font-mono text-slate-900">
+                        [{String.fromCharCode(65 + att.selectedOptionIndex)}] {studentAnswerText}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-1">
+                      <div className="font-bold text-emerald-800">✓ Correct Answer</div>
+                      <div className="font-mono text-slate-900 font-semibold">
+                        [{String.fromCharCode(65 + qItem.correctAnswerIndex)}] {correctAnswerText}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-2.5 text-xs">
+                    <div className="font-bold text-slate-900">
+                      Explanation &amp; Step-by-Step Solution:
+                    </div>
+                    <p className="text-slate-700 leading-relaxed">{qItem.explanation}</p>
+                    <ol className="space-y-1.5 text-slate-600 pt-1 border-t border-slate-100">
+                      <li>
+                        <strong className="text-[#B59024] font-mono">Step 1:</strong>{' '}
+                        {qItem.hints.hint1}
+                      </li>
+                      <li>
+                        <strong className="text-[#B59024] font-mono">Step 2:</strong>{' '}
+                        {qItem.hints.hint2}
+                      </li>
+                      <li>
+                        <strong className="text-[#B59024] font-mono">Step 3:</strong>{' '}
+                        {qItem.hints.hint3}
+                      </li>
+                    </ol>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveConceptId(att.conceptId);
+                        setRoute('learning-content');
+                      }}
+                      className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:border-[#D4AF37] text-xs font-semibold text-slate-800 transition-colors"
+                    >
+                      Review {qItem.conceptName} Lesson
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveConceptId(att.conceptId);
+                        sendTutorMessage(
+                          `Explain my mistake on "${qItem.question}" where I chose "${studentAnswerText}" instead of "${correctAnswerText}".`,
+                          'explain_mistake',
+                          att.conceptId
+                        );
+                        setRoute('ai-assistant');
+                      }}
+                      className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-slate-950 text-xs font-bold hover:bg-[#c59f2d] transition-colors"
+                    >
+                      Ask AI Tutor About This Mistake →
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {/* Prerequisite Gap Explanation Banner */}
-      <section className="p-6 md:p-8 rounded-2xl bg-[#FBF7E8] border border-[#D4AF37] space-y-4">
+      <section className="vo-card-hover-subtle p-6 md:p-8 rounded-2xl bg-[#FBF7E8] border border-[#D4AF37] space-y-4">
         <div className="flex items-center gap-2 text-xs font-bold text-[#B59024]">
           <Lock className="w-4 h-4" />
           <span>Prerequisite Check</span>

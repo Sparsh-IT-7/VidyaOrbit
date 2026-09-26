@@ -177,7 +177,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           {/* Circular SVG Progress Ring */}
-          <div className="flex items-center gap-5 self-start lg:self-center p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+          <div className="vo-card-hover flex items-center gap-5 self-start lg:self-center p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs">
             <div className="relative flex items-center justify-center w-28 h-28">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 120 120">
                 <circle
@@ -235,7 +235,7 @@ export const DashboardPage: React.FC = () => {
       {/* 2. FIVE CORE QUESTIONS CARDS */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Card 1: What do I know? */}
-        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span>1. What Do I Know?</span>
@@ -280,7 +280,7 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Card 2: What am I weak at? */}
-        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span>2. What Am I Weak At?</span>
@@ -318,7 +318,7 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Card 3: What should I learn next & Why? */}
-        <div className="p-5 rounded-2xl bg-[#FBF7E8]/70 border border-[#D4AF37] flex flex-col justify-between space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-5 rounded-2xl bg-[#FBF7E8]/70 border border-[#D4AF37] flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-[#B59024] font-bold">
               <span>3 &amp; 4. What To Learn Next</span>
@@ -352,7 +352,7 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Card 4: Am I improving? */}
-        <div className="p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
+        <div className="vo-card-hover p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between space-y-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span>5. Am I Improving?</span>
@@ -495,7 +495,7 @@ export const DashboardPage: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* LEFT COLUMN: Topic Breakdown (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-5">
+          <div className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-5">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs text-[#B59024] font-bold">
@@ -524,7 +524,7 @@ export const DashboardPage: React.FC = () => {
                   return (
                     <div
                       key={c.id}
-                      className="space-y-2 p-3.5 rounded-xl bg-[#FBF7E8]/60 border border-[#D4AF37]/50"
+                      className="vo-card-hover-subtle space-y-2 p-3.5 rounded-xl bg-[#FBF7E8]/60 border border-[#D4AF37]/50"
                     >
                       <div className="flex justify-between items-center text-xs">
                         <div className="flex items-center gap-2">
@@ -584,7 +584,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* RIGHT COLUMN: Quick Practice Card (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
+          <div className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className="text-xs text-[#B59024] font-bold">

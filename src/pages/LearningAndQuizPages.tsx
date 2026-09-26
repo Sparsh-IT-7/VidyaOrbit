@@ -219,7 +219,7 @@ export const LearningContentPage: React.FC = () => {
         {/* Section 1 & 2: What & Why */}
         <div
           id="sec-what"
-          className="p-6 rounded-2xl bg-white border border-slate-200 space-y-5 shadow-2xs"
+          className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 space-y-5 shadow-2xs"
         >
           <div className="space-y-2">
             <h2 className="text-lg font-bold text-slate-900">
@@ -239,7 +239,7 @@ export const LearningContentPage: React.FC = () => {
         {/* Section 3: Syntax */}
         <div
           id="sec-syntax"
-          className="p-6 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-2xs"
+          className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-2xs"
         >
           <h2 className="text-lg font-bold text-slate-900">3. Basic Syntax</h2>
           <pre className="p-4 rounded-xl bg-slate-900 font-mono text-xs md:text-sm text-[#D4AF37] overflow-x-auto leading-relaxed">
@@ -250,7 +250,7 @@ export const LearningContentPage: React.FC = () => {
         {/* Section 4: Worked Code Example & Walkthrough */}
         <div
           id="sec-example"
-          className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs"
+          className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900">
@@ -293,7 +293,7 @@ export const LearningContentPage: React.FC = () => {
         {/* Section 5: Common Mistakes */}
         <div
           id="sec-mistakes"
-          className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs"
+          className="vo-card-hover-subtle p-6 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs"
         >
           <h2 className="text-lg font-bold text-slate-900">5. Common Mistakes to Avoid</h2>
           {levelContent.commonMistakes.map((m) => (
@@ -324,7 +324,7 @@ export const LearningContentPage: React.FC = () => {
         {/* Section 6: Inline Concept Practice */}
         <div
           id="sec-practice"
-          className="p-6 rounded-2xl bg-[#FBF7E8]/60 border border-[#D4AF37] space-y-4"
+          className="vo-card-hover-subtle p-6 rounded-2xl bg-[#FBF7E8]/60 border border-[#D4AF37] space-y-4"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900">6. Quick Check</h2>
@@ -630,7 +630,7 @@ export const AdaptiveQuizPage: React.FC = () => {
       </section>
 
       {/* Main Question & Progressive Hints Card */}
-      <section className="p-6 md:p-8 rounded-2xl bg-white border border-slate-200 space-y-6 shadow-2xs">
+      <section className="vo-card-hover-subtle p-6 md:p-8 rounded-2xl bg-white border border-slate-200 space-y-6 shadow-2xs">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <div className="flex items-center gap-2 text-xs">
             <span className="font-bold text-[#B59024]">

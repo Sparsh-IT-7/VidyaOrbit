@@ -20,6 +20,8 @@ import {
   CheckCircle2,
   KeyRound,
   RefreshCw,
+  LogIn,
+  UserPlus,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
 import { BrandLogo } from '../components/AppShell';
@@ -166,7 +168,7 @@ export const LandingPage: React.FC = () => {
 
           {/* Clean Student Snapshot Card */}
           <div className="lg:col-span-5">
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-5">
+            <div className="vo-card-hover p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-5">
               <div className="flex items-center justify-between border-b border-slate-200 pb-4">
                 <div>
                   <div className="text-xs text-[#B59024] font-bold">
@@ -253,7 +255,7 @@ export const LandingPage: React.FC = () => {
             {workflowSteps.map((item, idx) => (
               <div
                 key={item.step}
-                className="p-5 rounded-xl bg-white border border-slate-200 flex flex-col justify-between"
+                className="vo-card-hover p-5 rounded-xl bg-white border border-slate-200 flex flex-col justify-between"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -290,7 +292,7 @@ export const LandingPage: React.FC = () => {
             return (
               <div
                 key={cap.title}
-                className="p-6 rounded-2xl bg-white border border-slate-200 space-y-3 flex flex-col justify-between"
+                className="vo-card-hover p-6 rounded-2xl bg-white border border-slate-200 space-y-3 flex flex-col justify-between"
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -310,7 +312,7 @@ export const LandingPage: React.FC = () => {
 
       {/* Deterministic vs AI Separation Architecture Banner */}
       <section id="architecture" className="py-12 px-6 md:px-12 max-w-[1280px] mx-auto w-full pb-20">
-        <div className="p-8 rounded-2xl bg-slate-50 border border-slate-200 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="vo-card-hover-subtle p-8 rounded-2xl bg-slate-50 border border-slate-200 grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-2.5">
             <div className="flex items-center gap-2 text-xs font-bold text-[#B59024]">
               <ShieldCheck className="w-4 h-4" />
@@ -533,14 +535,25 @@ export const AuthPage: React.FC<{ mode: 'login' | 'signup' }> = ({ mode }) => {
   return (
     <AuthPageLayout>
       <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6">
-        {/* Header */}
-        <div className="space-y-1.5">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
-            VidyaOrbit
+        {/* Header with Login Logo */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-[#D4AF37] text-slate-950 flex items-center justify-center shadow-2xs shrink-0">
+              {mode === 'login' ? (
+                <LogIn className="w-5 h-5 stroke-[2.5]" />
+              ) : (
+                <UserPlus className="w-5 h-5 stroke-[2.5]" />
+              )}
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
+                VidyaOrbit
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900">
+                {mode === 'login' ? 'Student Login' : 'Create Account'}
+              </h1>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            {mode === 'login' ? 'Student Login' : 'Create Account'}
-          </h1>
           <p className="text-sm text-slate-600 leading-relaxed">
             {mode === 'login'
               ? 'Sign in to access your diagnostic tests, performance analysis, syllabus, and AI Tutor.'
@@ -929,11 +942,18 @@ export const VerifyEmailPage: React.FC = () => {
   return (
     <AuthPageLayout>
       <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6">
-        <div className="space-y-1.5">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
-            VidyaOrbit
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-[#D4AF37] text-slate-950 flex items-center justify-center shadow-2xs shrink-0">
+              <MailCheck className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
+                VidyaOrbit
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900">Email Verification</h1>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Email Verification</h1>
           <p className="text-sm text-slate-600 leading-relaxed">
             Confirm your student email address to activate your VidyaOrbit account.
           </p>
@@ -1127,11 +1147,18 @@ export const ForgotPasswordPage: React.FC = () => {
   return (
     <AuthPageLayout>
       <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6">
-        <div className="space-y-1.5">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
-            VidyaOrbit
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-[#D4AF37] text-slate-950 flex items-center justify-center shadow-2xs shrink-0">
+              <KeyRound className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
+                VidyaOrbit
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900">Reset Your Password</h1>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Reset Your Password</h1>
           <p className="text-sm text-slate-600 leading-relaxed">
             Enter your student email address and we will send you a temporary link to create a new
             password.
@@ -1290,11 +1317,18 @@ export const ResetPasswordPage: React.FC = () => {
   return (
     <AuthPageLayout>
       <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6">
-        <div className="space-y-1.5">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
-            VidyaOrbit
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-[#D4AF37] text-slate-950 flex items-center justify-center shadow-2xs shrink-0">
+              <KeyRound className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-[#B59024]">
+                VidyaOrbit
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900">Create New Password</h1>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Create New Password</h1>
           <p className="text-sm text-slate-600 leading-relaxed">
             Choose a strong password (at least 8 characters) for your VidyaOrbit student account.
           </p>
@@ -1562,10 +1596,10 @@ export const OnboardingPage: React.FC = () => {
                     key={subj.id}
                     type="button"
                     onClick={() => selectEngineeringSubject(subj.id)}
-                    className={`p-4 rounded-xl border text-left transition-all flex items-start justify-between gap-3 ${
+                    className={`vo-card-hover p-4 rounded-xl border text-left flex items-start justify-between gap-3 ${
                       isSelected
                         ? 'bg-[#FBF7E8] border-[#D4AF37]'
-                        : 'bg-white border-slate-200 hover:border-slate-300'
+                        : 'bg-white border-slate-200'
                     }`}
                   >
                     <div className="space-y-1">
@@ -1608,7 +1642,7 @@ export const OnboardingPage: React.FC = () => {
                       key={topic.id}
                       type="button"
                       onClick={() => toggleTopic(topic.id)}
-                      className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
+                      className={`vo-card-hover p-3 rounded-xl border text-left flex items-center justify-between ${
                         checked
                           ? 'bg-[#FBF7E8]/60 border-[#D4AF37] text-slate-900'
                           : 'bg-white border-slate-200 text-slate-500'
@@ -1720,10 +1754,10 @@ export const OnboardingPage: React.FC = () => {
                   key={item.lvl}
                   type="button"
                   onClick={() => setLevel(item.lvl)}
-                  className={`p-5 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                  className={`vo-card-hover p-5 rounded-xl border text-left flex flex-col justify-between ${
                     level === item.lvl
                       ? 'bg-[#FBF7E8] border-[#D4AF37] text-slate-900'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                      : 'bg-white border-slate-200 text-slate-600'
                   }`}
                 >
                   <div className="space-y-2">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   LayoutDashboard,
   Route,
@@ -21,12 +21,12 @@ import {
   SlidersHorizontal,
   Orbit,
   GraduationCap,
+  User,
+  LogIn,
+  ArrowRight,
 } from 'lucide-react';
 import { useLearning } from '../context/LearningContext';
 import { AppRoute, ConceptId } from '../types/learning';
-
-export const ALEX_AVATAR_URL =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuC3oWOzAVPgMGojCvJ_is4tiRx6uImaGBTwZ6RuHIDqOAc_7I1NrlDnEX8IbyeV27vjmNPhU1yGuZwQzGW05YpZsiNxQ5L1xpXXHesu3k2TLdrpo-_3-NFaAkwynwsXsQqHwNoYmMaX8pWDRCI1694fvwDkSdEe0z5-qrCZO0VaOQ5M9cgyNZhSuBGIK2iv0naixcWI-XsIFwEluwSs7EJpg4dMgPyBeI_bA2cTea6GwPhcrPXnoHhz';
 
 export const BrandLogo: React.FC<{ size?: 'sm' | 'md' }> = ({ size = 'md' }) => {
   return (
@@ -46,31 +46,18 @@ export const BrandLogo: React.FC<{ size?: 'sm' | 'md' }> = ({ size = 'md' }) => 
 };
 
 export const UserAvatar: React.FC<{ className?: string; name?: string }> = ({
-  className = 'w-8 h-8 rounded-full object-cover',
-  name = 'Alex Chen',
+  className = 'w-8 h-8 rounded-full',
+  name = 'Student',
 }) => {
-  const [imgError, setImgError] = useState(false);
-  if (imgError) {
-    return (
-      <div
-        className={`${className} bg-[#D4AF37] text-slate-950 font-bold text-xs flex items-center justify-center`}
-      >
-        {name
-          .split(' ')
-          .map((n) => n[0])
-          .join('')
-          .slice(0, 2)}
-      </div>
-    );
-  }
+  const isLarge = className.includes('w-20') || className.includes('w-16');
   return (
-    <img
-      src={ALEX_AVATAR_URL}
-      alt={name}
-      referrerPolicy="no-referrer"
-      onError={() => setImgError(true)}
-      className={className}
-    />
+    <div
+      title={name}
+      aria-label={name}
+      className={`${className} bg-[#FBF7E8] border border-[#D4AF37] text-slate-900 flex items-center justify-center shrink-0 select-none`}
+    >
+      <User className={isLarge ? 'w-9 h-9 text-[#B59024] stroke-[2.2]' : 'w-4 h-4 text-[#B59024] stroke-[2.5]'} />
+    </div>
   );
 };
 
@@ -96,12 +83,24 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: Settings, group: 'account' },
 ];
 
+interface SearchTopicResult {
+  id: string;
+  title: string;
+  subtitle: string;
+  badge: string;
+  kind: 'concept' | 'syllabus';
+  conceptId?: ConceptId;
+  subjectId?: string;
+}
+
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
     route,
     setRoute,
     student,
     conceptStates,
+    subjects,
+    selectEngineeringSubject,
     setActiveConceptId,
     applyDemoPreset,
     logout,
@@ -112,17 +111,84 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [demoMenuOpen, setDemoMenuOpen] = useState(false);
 
-  const filteredConcepts = conceptStates.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.shortName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Build unified searchable topic list across interactive lessons and all engineering syllabus topics
+  const searchableTopics = useMemo<SearchTopicResult[]>(() => {
+    const results: SearchTopicResult[] = [];
 
-  const handleSelectConceptSearch = (conceptId: ConceptId) => {
-    setActiveConceptId(conceptId);
-    setSearchQuery('');
-    setSearchOpen(false);
-    setRoute('learning-content');
+    // 1. Interactive Concept Modules
+    conceptStates.forEach((c) => {
+      results.push({
+        id: `concept_${c.id}`,
+        title: c.name,
+        subtitle: `Interactive Lesson & Adaptive Quiz · ${c.status}`,
+        badge: `${c.mastery}% Mastery`,
+        kind: 'concept',
+        conceptId: c.id,
+      });
+    });
+
+    // 2. All Syllabus Topics from SubjectManagement
+    subjects.forEach((subj) => {
+      subj.syllabus.forEach((unit) => {
+        unit.topics.forEach((topic) => {
+          results.push({
+            id: `syllabus_${subj.id}_${topic.id}`,
+            title: topic.title,
+            subtitle: `${subj.name} (${subj.code}) · Unit ${unit.unitNumber}: ${unit.title}`,
+            badge: topic.difficulty,
+            kind: 'syllabus',
+            conceptId: topic.mappedConceptId,
+            subjectId: subj.id,
+          });
+        });
+      });
+    });
+
+    return results;
+  }, [conceptStates, subjects]);
+
+  const filteredTopics = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      return searchableTopics.slice(0, 9);
+    }
+    return searchableTopics
+      .filter(
+        (item) =>
+          item.title.toLowerCase().includes(q) ||
+          item.subtitle.toLowerCase().includes(q) ||
+          item.badge.toLowerCase().includes(q)
+      )
+      .slice(0, 12);
+  }, [searchableTopics, searchQuery]);
+
+  const handleSelectTopicResult = (item: SearchTopicResult) => {
+    if (item.conceptId) {
+      setActiveConceptId(item.conceptId);
+      if (item.subjectId) {
+        selectEngineeringSubject(item.subjectId);
+      }
+      setSearchQuery('');
+      setSearchOpen(false);
+      setRoute('learning-content');
+      return;
+    }
+
+    if (item.subjectId) {
+      selectEngineeringSubject(item.subjectId);
+      setSearchQuery('');
+      setSearchOpen(false);
+      setRoute('subjects');
+    }
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && filteredTopics.length > 0) {
+      e.preventDefault();
+      handleSelectTopicResult(filteredTopics[0]);
+    } else if (e.key === 'Escape') {
+      setSearchOpen(false);
+    }
   };
 
   return (
@@ -330,7 +396,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <div className="flex-1 lg:pl-64 flex flex-col min-w-0 bg-white">
         {/* Top Header */}
         <header className="sticky top-0 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 z-40 px-4 md:px-8 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 flex-1 max-w-md relative">
+          <div className="flex items-center gap-3 flex-1 max-w-lg relative">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
@@ -339,6 +405,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <Menu className="w-5 h-5" />
             </button>
 
+            {/* Clean Topic Search Bar without hardcoded subject badge */}
             <div className="relative flex-1">
               <div className="flex items-center gap-2 w-full px-3.5 py-2 bg-slate-50 border border-slate-200 focus-within:border-[#D4AF37] focus-within:bg-white rounded-xl text-slate-700 transition-colors">
                 <Search className="w-4 h-4 text-slate-400 shrink-0" />
@@ -346,37 +413,66 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   type="text"
                   value={searchQuery}
                   onFocus={() => setSearchOpen(true)}
-                  onBlur={() => setTimeout(() => setSearchOpen(false), 180)}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search a topic (e.g. Functions, Pointers)..."
+                  onBlur={() => setTimeout(() => setSearchOpen(false), 200)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setSearchOpen(true);
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Search any topic (e.g. Functions, Pointers, Trees, SQL, Deadlocks)..."
                   className="bg-transparent border-0 outline-none w-full text-slate-900 placeholder:text-slate-400 text-xs"
                 />
-                <span className="hidden sm:inline-block px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 font-mono text-[11px] whitespace-nowrap">
-                  {student.subject}
-                </span>
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setSearchQuery('');
+                    }}
+                    aria-label="Clear search"
+                    className="p-0.5 rounded text-slate-400 hover:text-slate-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
               {searchOpen && (
-                <div className="absolute left-0 right-0 top-11 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-50 max-h-72 overflow-y-auto">
-                  <div className="px-2.5 py-1 text-[11px] text-slate-400 font-semibold">
-                    Jump to Topic Lesson
+                <div className="absolute left-0 right-0 top-11 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-50 max-h-80 overflow-y-auto">
+                  <div className="px-2.5 py-1 flex items-center justify-between text-[11px] text-slate-400 font-semibold">
+                    <span>
+                      {searchQuery.trim()
+                        ? `Matching Topics (${filteredTopics.length})`
+                        : 'Search Topics Across Lessons & Syllabus'}
+                    </span>
+                    <span>Press Enter to open</span>
                   </div>
-                  {filteredConcepts.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onMouseDown={() => handleSelectConceptSearch(c.id)}
-                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[#FBF7E8] text-left transition-colors"
-                    >
-                      <div>
-                        <div className="text-xs font-semibold text-slate-900">{c.name}</div>
-                        <div className="text-[11px] text-slate-500">{c.status}</div>
-                      </div>
-                      <span className="font-mono text-xs font-bold text-[#B59024] tabular-nums">
-                        {c.mastery}%
-                      </span>
-                    </button>
-                  ))}
+
+                  {filteredTopics.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-500">
+                      No topics found matching &ldquo;{searchQuery}&rdquo;.
+                    </div>
+                  ) : (
+                    filteredTopics.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onMouseDown={() => handleSelectTopicResult(item)}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg hover:bg-[#FBF7E8] text-left transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-slate-900 truncate">
+                            {item.title}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">{item.subtitle}</div>
+                        </div>
+                        <span className="shrink-0 inline-flex items-center gap-1 font-mono text-[11px] font-bold text-[#B59024] tabular-nums">
+                          <span>{item.badge}</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </span>
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
             </div>
@@ -475,7 +571,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   {student.name}
                 </span>
                 <span className="text-[11px] text-[#B59024] font-semibold leading-tight whitespace-nowrap">
-                  {student.level} · {student.subject}
+                  {student.level}
                 </span>
               </div>
             </button>

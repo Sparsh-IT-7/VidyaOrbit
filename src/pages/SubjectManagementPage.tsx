@@ -318,10 +318,10 @@ export const SubjectManagementPage: React.FC = () => {
                 <div
                   key={subj.id}
                   onClick={() => setInspectedSubjectId(subj.id)}
-                  className={`p-5 rounded-2xl border cursor-pointer transition-all space-y-3 ${
+                  className={`vo-card-hover p-5 rounded-2xl border cursor-pointer space-y-3 ${
                     isSelected
                       ? 'bg-[#FBF7E8]/80 border-[#D4AF37] shadow-sm'
-                      : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                      : 'bg-white border-slate-200'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -428,25 +428,25 @@ export const SubjectManagementPage: React.FC = () => {
 
             {/* Metadata Summary Strip */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="vo-card-hover p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-[11px] text-slate-500">Subject Code</div>
                 <div className="text-base font-extrabold font-mono text-slate-900 mt-0.5">
                   {inspectedSubject.code}
                 </div>
               </div>
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="vo-card-hover p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-[11px] text-slate-500">Year / Semester</div>
                 <div className="text-base font-extrabold text-slate-900 mt-0.5">
                   Y{inspectedSubject.year} · Sem {inspectedSubject.semester}
                 </div>
               </div>
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="vo-card-hover p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-[11px] text-slate-500">Syllabus Units</div>
                 <div className="text-base font-extrabold font-mono text-[#B59024] mt-0.5">
                   {totalUnitsCount} Units ({totalTopicsCount} Topics)
                 </div>
               </div>
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="vo-card-hover p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-[11px] text-slate-500">Contact Hours</div>
                 <div className="text-base font-extrabold font-mono text-slate-900 mt-0.5">
                   {totalHoursCount} hrs ({inspectedSubject.credits} Cr)
@@ -559,7 +559,7 @@ export const SubjectManagementPage: React.FC = () => {
               {inspectedSubject.syllabus.map((unit) => (
                 <div
                   key={unit.unitNumber}
-                  className="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-4"
+                  className="vo-card-hover-subtle p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
                     <div>
@@ -581,7 +581,7 @@ export const SubjectManagementPage: React.FC = () => {
                       {unit.topics.map((topic) => (
                         <div
                           key={topic.id}
-                          className="p-3 rounded-xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                          className="vo-card-hover-subtle p-3 rounded-xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                         >
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-2">
